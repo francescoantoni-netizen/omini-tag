@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Acchiapparella</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -25,6 +25,14 @@
     <canvas id="arena" width="800" height="600"></canvas>
     <div id="banner" hidden></div>
     <p class="hint">Muoviti con le frecce, WASD, oppure spingi il TrackPoint mentre il cursore è sopra l'arena</p>
+  </div>
+
+  <div id="joystick">
+    <div id="joystick-knob"></div>
+  </div>
+
+  <div id="rotate-hint">
+    <p>📱 Ruota il telefono in orizzontale per giocare meglio</p>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>

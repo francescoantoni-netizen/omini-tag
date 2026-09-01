@@ -19,11 +19,17 @@ const banner = document.getElementById('banner');
 let myId = null;
 let latestState = null;
 
-joinForm.addEventListener('submit', (e) => {
+joinForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   socket.emit('join', nameInput.value.trim() || 'Omino');
   joinScreen.hidden = true;
   gameScreen.hidden = false;
+  // Il click sul bottone "Entra in partita" è un gesto dell'utente: è
+  // l'unico momento in cui il browser ci permette di chiedere fullscreen /
+  // blocco orientamento / schermo sempre acceso. Se lo facessimo dopo,
+  // senza un click appena avvenuto, il browser rifiuterebbe la richiesta.
+  await tryLockLandscape();
+  await tryKeepScreenAwake();
 });
 
 socket.on('joined', ({ id }) => {
@@ -74,6 +80,53 @@ function flashBanner(text, ms) {
   bannerTimeout = setTimeout(() => { banner.hidden = true; }, ms);
 }
 
+// ---- Orientamento orizzontale e schermo sempre acceso (mobile) -----------
+// Bloccare davvero l'orientamento è "best effort": funziona su Chrome
+// Android (e di solito richiede prima il fullscreen), ma su Safari/iPhone
+// questa API web non esiste affatto — per questo teniamo comunque
+// l'avviso "ruota il telefono" (in index.html/style.css) come soluzione
+// che funziona sempre, ovunque questo tentativo fallisca in silenzio.
+async function tryLockLandscape() {
+  const isTouch = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  if (!isTouch) return;
+  try {
+    if (document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen();
+    }
+    if (screen.orientation && screen.orientation.lock) {
+      await screen.orientation.lock('landscape');
+    }
+  } catch (err) {
+    // niente di grave: restiamo con l'avviso di ruotare il telefono a mano
+  }
+}
+
+// Il telefono spegnerebbe lo schermo per inattività, ma durante la partita
+// non stai "toccando" lo schermo in continuazione (tieni il dito fermo sul
+// joystick) — il Wake Lock dice al sistema operativo di non spegnerlo.
+let wakeLock = null;
+async function tryKeepScreenAwake() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  } catch (err) {
+    // non grave: nel peggiore dei casi lo schermo si spegne dopo un po'
+  }
+}
+
+// Il Wake Lock si rilascia da solo quando cambi scheda/app; se torni sul
+// gioco proviamo a richiederlo di nuovo.
+document.addEventListener('visibilitychange', async () => {
+  if (wakeLock !== null && document.visibilityState === 'visible' && !gameScreen.hidden) {
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+    } catch (err) {
+      // ignorabile
+    }
+  }
+});
+
 // ---- Input da tastiera ----------------------------------------------------
 const input = { up: false, down: false, left: false, right: false };
 const KEY_MAP = {
@@ -104,6 +157,28 @@ const TRACKPOINT_THRESHOLD = 2;   // sensibilità minima per contare come "spint
 const TRACKPOINT_RELEASE_MS = 120; // se non arrivano eventi per questo tempo, fermati
 let trackpointTimeout = null;
 
+// Proviamo ad "agganciare" il cursore (Pointer Lock): così il movimento
+// resta relativo e infinito, senza fermarsi quando il cursore tocca il
+// bordo dello schermo. Se il browser lo rifiuta (es. per il vincolo di
+// contesto sicuro su indirizzi non-HTTPS) non succede nulla di grave: il
+// movimento via mousemove qui sotto continua a funzionare come prima,
+// solo con il limite del bordo schermo.
+canvas.addEventListener('click', () => {
+  if (canvas.requestPointerLock) {
+    canvas.requestPointerLock().catch(() => {
+      // niente da fare: restiamo nella modalità "cursore libero"
+    });
+  }
+});
+
+document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement !== canvas) {
+    // l'aggancio è stato rilasciato (es. hai premuto Esc): fermiamo il movimento
+    input.up = input.down = input.left = input.right = false;
+    socket.emit('input', input);
+  }
+});
+
 canvas.addEventListener('mousemove', (e) => {
   const dx = e.movementX || 0;
   const dy = e.movementY || 0;
@@ -127,6 +202,78 @@ canvas.addEventListener('mousemove', (e) => {
     socket.emit('input', input);
   }, TRACKPOINT_RELEASE_MS);
 });
+
+// ---- Joystick touch (telefono/tablet) -------------------------------------
+// A differenza del TrackPoint, il touch ha un evento "l'ho rilasciato" vero
+// (touchend), quindi qui non serve nessun timeout per simulare il rilascio.
+const joystick = document.getElementById('joystick');
+const joystickKnob = document.getElementById('joystick-knob');
+const JOYSTICK_MAX_RADIUS = 40; // quanto può spostarsi visivamente la manopola
+const JOYSTICK_DEADZONE = 12;   // spostamento minimo prima di contare come "spinto"
+
+let joystickTouchId = null;
+let joystickCenter = { x: 0, y: 0 };
+
+function joystickReset() {
+  joystickKnob.style.transform = 'translate(-50%, -50%)';
+  input.up = input.down = input.left = input.right = false;
+  socket.emit('input', input);
+}
+
+function joystickHandleMove(touch) {
+  const dx = touch.clientX - joystickCenter.x;
+  const dy = touch.clientY - joystickCenter.y;
+  const dist = Math.hypot(dx, dy);
+
+  // muovi la manopola visivamente, senza uscire dal cerchio
+  const clampedDist = Math.min(dist, JOYSTICK_MAX_RADIUS);
+  const angle = Math.atan2(dy, dx);
+  const knobX = Math.cos(angle) * clampedDist;
+  const knobY = Math.sin(angle) * clampedDist;
+  joystickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
+
+  const dir = dist < JOYSTICK_DEADZONE
+    ? { up: false, down: false, left: false, right: false }
+    : {
+        up: dy < -JOYSTICK_DEADZONE,
+        down: dy > JOYSTICK_DEADZONE,
+        left: dx < -JOYSTICK_DEADZONE,
+        right: dx > JOYSTICK_DEADZONE,
+      };
+
+  let changed = false;
+  for (const d of ['up', 'down', 'left', 'right']) {
+    if (input[d] !== dir[d]) { input[d] = dir[d]; changed = true; }
+  }
+  if (changed) socket.emit('input', input);
+}
+
+joystick.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const touch = e.changedTouches[0];
+  joystickTouchId = touch.identifier;
+  const rect = joystick.getBoundingClientRect();
+  joystickCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  joystickHandleMove(touch);
+});
+
+joystick.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  for (const touch of e.changedTouches) {
+    if (touch.identifier === joystickTouchId) joystickHandleMove(touch);
+  }
+});
+
+function joystickHandleEnd(e) {
+  for (const touch of e.changedTouches) {
+    if (touch.identifier === joystickTouchId) {
+      joystickTouchId = null;
+      joystickReset();
+    }
+  }
+}
+joystick.addEventListener('touchend', joystickHandleEnd);
+joystick.addEventListener('touchcancel', joystickHandleEnd);
 
 // ---- Rendering --------------------------------------------------------
 const COLORS = {

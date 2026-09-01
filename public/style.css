@@ -94,3 +94,80 @@ canvas {
   color: var(--muted);
   font-size: 13px;
 }
+
+/* ---- Joystick touch (solo dispositivi touch) --------------------------- */
+/* "pointer: coarse" + "hover: none" è il modo standard per riconoscere un
+   dispositivo che si usa col dito, non col mouse — su PC questo blocco
+   semplicemente non si applica mai, il joystick resta nascosto. */
+#joystick {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  #joystick {
+    display: block;
+    position: fixed;
+    /* env(safe-area-inset-*) tiene il joystick lontano dal "notch"/isola
+       dinamica o dagli angoli arrotondati quando il telefono è in
+       orizzontale — su un telefono senza queste zone equivale sempre a 0,
+       quindi non cambia nulla su schermi normali. */
+    left: max(28px, calc(env(safe-area-inset-left) + 16px));
+    bottom: max(28px, calc(env(safe-area-inset-bottom) + 16px));
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    touch-action: none;
+    z-index: 5;
+  }
+
+  #joystick-knob {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0.85;
+    transform: translate(-50%, -50%);
+  }
+
+  /* su touch il testo "muoviti con le frecce..." non serve più */
+  .hint {
+    display: none;
+  }
+
+  #game-screen {
+    padding: 8px;
+    /* niente selezione testo/menu "copia" al tocco lungo, e niente
+       "callout" (il popup che iOS mostra tenendo premuto un elemento) —
+       senza questo, un dito fermo troppo a lungo sul joystick rischia di
+       aprire un menu di sistema invece di continuare a muoversi */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
+
+/* ---- Suggerimento di ruotare il telefono -------------------------------- */
+#rotate-hint {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) and (orientation: portrait) {
+  #rotate-hint {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: var(--bg);
+    color: var(--text);
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 32px;
+    font-size: 16px;
+  }
+}
