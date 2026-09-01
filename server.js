@@ -29,6 +29,13 @@ const COUNTDOWN_MS = 3 * 1000;
 const RESULT_PAUSE_MS = 5 * 1000;
 const TICK_MS = 50; // 20 aggiornamenti al secondo
 
+// ---- Frutti con boost di velocità ------------------------------------
+const FRUIT_RADIUS = 10;
+const FRUIT_COUNT = 3;                // quanti frutti stanno in campo insieme
+const FRUIT_BOOST_MULTIPLIER = 1.2;   // +20% velocità
+const FRUIT_BOOST_DURATION_MS = 5 * 1000;
+const FRUIT_RESPAWN_DELAY_MS = 4 * 1000; // dopo quanto ne spunta uno nuovo al posto di quello mangiato
+
 const OBSTACLES = [
   { x: 150, y: 120, w: 120, h: 40 },
   { x: 520, y: 400, w: 140, h: 40 },
@@ -44,6 +51,12 @@ let lastHunterOrder = -1; // per ruotare il cacciatore in modo equo tra i round
 let phase = 'waiting'; // waiting | countdown | playing | ended
 let phaseEndsAt = 0;
 let roundEndsAt = 0;
+
+// fruits: [{ id, x, y }]. pendingFruitRespawns: timestamp a cui far
+// ricomparire un frutto nuovo, uno per ogni frutto mangiato in attesa.
+let fruits = [];
+let fruitIdCounter = 0;
+let pendingFruitRespawns = [];
 
 function alivePlayers() {
   return [...players.values()].filter((p) => p.role !== 'spectator');
@@ -83,6 +96,44 @@ function collidesWithObstacles(x, y) {
   });
 }
 
+function spawnFruit() {
+  for (let tries = 0; tries < 20; tries++) {
+    const x = FRUIT_RADIUS + Math.random() * (ARENA_W - FRUIT_RADIUS * 2);
+    const y = FRUIT_RADIUS + Math.random() * (ARENA_H - FRUIT_RADIUS * 2);
+    if (!collidesWithObstacles(x, y)) {
+      fruits.push({ id: fruitIdCounter++, x, y });
+      return;
+    }
+  }
+  fruits.push({ id: fruitIdCounter++, x: ARENA_W / 2, y: ARENA_H / 2 });
+}
+
+function resetFruits() {
+  fruits = [];
+  pendingFruitRespawns = [];
+  for (let i = 0; i < FRUIT_COUNT; i++) spawnFruit();
+}
+
+function checkFruitPickups() {
+  if (phase !== 'playing') return;
+  const now = Date.now();
+  const pickupRadius = PLAYER_RADIUS + FRUIT_RADIUS;
+  for (const p of players.values()) {
+    if (p.role === 'spectator' || !p.alive) continue;
+    for (let i = fruits.length - 1; i >= 0; i--) {
+      const f = fruits[i];
+      const dx = p.x - f.x;
+      const dy = p.y - f.y;
+      if (dx * dx + dy * dy < pickupRadius * pickupRadius) {
+        fruits.splice(i, 1);
+        p.boostUntil = now + FRUIT_BOOST_DURATION_MS;
+        pendingFruitRespawns.push(now + FRUIT_RESPAWN_DELAY_MS);
+        io.emit('fruitEaten', { id: p.id, name: p.name });
+      }
+    }
+  }
+}
+
 function startCountdown() {
   phase = 'countdown';
   phaseEndsAt = Date.now() + COUNTDOWN_MS;
@@ -95,8 +146,11 @@ function startCountdown() {
     p.x = pos.x;
     p.y = pos.y;
     p.input = { up: false, down: false, left: false, right: false, vx: 0, vy: 0 };
+    p.boostUntil = 0; // nessun boost residuo dal round precedente
   }
   if (hunter) lastHunterOrder = hunter.order;
+
+  resetFruits();
 }
 
 function startRound() {
@@ -107,6 +161,8 @@ function startRound() {
 function endRound(winner) {
   phase = 'ended';
   phaseEndsAt = Date.now() + RESULT_PAUSE_MS;
+  fruits = [];
+  pendingFruitRespawns = [];
   io.emit('roundResult', { winner });
 }
 
@@ -136,7 +192,9 @@ function movePlayer(p, dt) {
     }
   }
 
-  const speed = p.role === 'hunter' ? HUNTER_SPEED : RUNNER_SPEED;
+  const baseSpeed = p.role === 'hunter' ? HUNTER_SPEED : RUNNER_SPEED;
+  const boosted = p.boostUntil && Date.now() < p.boostUntil;
+  const speed = boosted ? baseSpeed * FRUIT_BOOST_MULTIPLIER : baseSpeed;
   const step = (speed * dt) / 1000;
 
   // muovi un asse alla volta, così scivoli lungo i muri/ostacoli invece di
@@ -185,6 +243,7 @@ setInterval(() => {
     if (now >= phaseEndsAt) startRound();
   } else if (phase === 'playing') {
     for (const p of players.values()) movePlayer(p, dt);
+    checkFruitPickups();
     checkCatches();
     if (phase === 'playing' && now >= roundEndsAt) endRound('runners');
   } else if (phase === 'ended') {
@@ -194,11 +253,20 @@ setInterval(() => {
     }
   }
 
+  // frutti mangiati che devono ricomparire: appena il loro momento arriva,
+  // ne spunta uno nuovo altrove e lo togliamo dalla lista d'attesa
+  pendingFruitRespawns = pendingFruitRespawns.filter((respawnAt) => {
+    if (now < respawnAt) return true;
+    spawnFruit();
+    return false;
+  });
+
   io.emit('state', {
     phase,
     timeLeft: phase === 'playing' ? Math.max(0, roundEndsAt - now) : null,
     countdownLeft: phase === 'countdown' ? Math.max(0, phaseEndsAt - now) : null,
     arena: { w: ARENA_W, h: ARENA_H, obstacles: OBSTACLES },
+    fruits: fruits.map((f) => ({ id: f.id, x: f.x, y: f.y })),
     players: [...players.values()].map((p) => ({
       id: p.id,
       name: p.name,
@@ -206,6 +274,7 @@ setInterval(() => {
       y: p.y,
       role: p.role,
       alive: p.alive,
+      boosted: !!(p.boostUntil && now < p.boostUntil),
     })),
   });
 }, TICK_MS);
@@ -222,6 +291,7 @@ io.on('connection', (socket) => {
       input: { up: false, down: false, left: false, right: false, vx: 0, vy: 0 },
       role: 'spectator', // entra come spettatore, gioca dal round successivo
       alive: true,
+      boostUntil: 0,
       order: joinCounter++,
     });
     socket.emit('joined', { id: socket.id });
