@@ -26,8 +26,9 @@ joinForm.addEventListener('submit', async (e) => {
   gameScreen.hidden = false;
   // Il click sul bottone "Entra in partita" è un gesto dell'utente: è
   // l'unico momento in cui il browser ci permette di chiedere lo schermo
-  // sempre acceso.
+  // sempre acceso, ed è anche l'unico momento in cui può partire l'audio.
   await tryKeepScreenAwake();
+  initAudio();
 });
 
 socket.on('joined', ({ id }) => {
@@ -48,6 +49,8 @@ socket.on('roundResult', ({ winner }) => {
     ? 'Il cacciatore ha preso tutti! 🎯'
     : 'I fuggitivi ce l\'hanno fatta! 🏆';
   flashBanner(msg, 4000);
+  if (winner === 'hunter') playSadTune();
+  else playHappyTune();
 });
 
 function updateHud(state) {
@@ -73,9 +76,59 @@ function updateHud(state) {
 let bannerTimeout = null;
 function flashBanner(text, ms) {
   banner.textContent = text;
-  banner.hidden = false;
+  banner.classList.add('show');
   clearTimeout(bannerTimeout);
-  bannerTimeout = setTimeout(() => { banner.hidden = true; }, ms);
+  bannerTimeout = setTimeout(() => { banner.classList.remove('show'); }, ms);
+}
+
+// ---- Musichette di fine round ---------------------------------------------
+// Niente file audio da caricare: generiamo le note al volo con il Web
+// Audio API, che ogni browser sa già fare da solo. I browser bloccano
+// l'audio finché non c'è stata almeno un'interazione vera dell'utente —
+// per questo "sblocchiamo" l'audio proprio nel click di "Entra in
+// partita" (initAudio, chiamato più sotto), lo stesso identico gesto che
+// usiamo già per lo schermo sempre acceso.
+let audioCtx = null;
+function initAudio() {
+  if (audioCtx) return;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  try {
+    audioCtx = new AudioContextClass();
+  } catch (err) {
+    // non grave: nel peggiore dei casi il gioco resta senza suoni
+  }
+}
+
+function playNote(freq, startDelay, duration, volume = 0.15) {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  const startTime = audioCtx.currentTime + startDelay;
+  // una piccola "busta" di volume che sale e scende dolcemente: senza,
+  // si sente un click secco all'inizio e alla fine di ogni nota
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(volume, startTime + 0.02);
+  gain.gain.linearRampToValueAtTime(0, startTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(startTime);
+  osc.stop(startTime + duration + 0.05);
+}
+
+function playSadTune() {
+  // 4 note discendenti in tonalità minore: la classica "musichina della
+  // sconfitta" (Sol-Fa-Mib-Do)
+  const notes = [392.0, 349.23, 311.13, 261.63];
+  notes.forEach((freq, i) => playNote(freq, i * 0.22, 0.35));
+}
+
+function playHappyTune() {
+  // piccolo arpeggio ascendente in maggiore: una mini-fanfara di vittoria
+  const notes = [523.25, 659.25, 783.99, 1046.5];
+  notes.forEach((freq, i) => playNote(freq, i * 0.12, 0.25));
 }
 
 // ---- Schermo sempre acceso (mobile) ---------------------------------------

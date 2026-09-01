@@ -97,9 +97,18 @@ button {
 
 #hud {
   display: flex;
+  align-items: center;
   gap: 20px;
   font-size: 15px;
-  min-height: 20px;
+  /* Altezza FISSA (non solo minima) con "overflow: hidden": i testi che
+     cambiano qui dentro ("Si parte tra poco…", "Sei stato preso — guarda
+     il resto del round.", ecc.) hanno lunghezze molto diverse — se
+     l'altezza dell'HUD potesse crescere quando un testo va a capo,
+     spingerebbe giù l'arena sotto e farebbe "saltare" lo schermo, lo
+     stesso identico problema che avevamo con il banner. Fissandola qui,
+     l'arena resta sempre nello stesso punto qualunque sia il testo. */
+  height: 42px;
+  overflow: hidden;
 }
 
 #role-label { font-weight: 600; }
@@ -114,11 +123,30 @@ canvas {
 }
 
 #banner {
-  position: relative;
+  /* "position: fixed" lo toglie dal flusso normale della pagina: prima
+     era un elemento come gli altri dentro la colonna (HUD/canvas/banner),
+     quindi quando compariva spingeva giù tutto il resto e faceva
+     "saltare" lo schermo. Ora galleggia sopra a tutto, in alto, senza
+     spostare nient'altro. */
+  position: fixed;
+  top: max(16px, calc(env(safe-area-inset-top) + 10px));
+  left: 50%;
+  z-index: 20;
   padding: 10px 18px;
   border-radius: 8px;
   background: var(--panel);
   font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  /* nascosto/mostrato con una dissolvenza invece che con uno scatto secco */
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -10px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+#banner.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 .hint {
@@ -165,7 +193,6 @@ canvas {
   }
 
   #hud {
-    min-height: 18px;
     font-size: 13px;
   }
 
