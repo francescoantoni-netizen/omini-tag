@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Acchiapparella</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="join-screen">
+    <h1>🏃 Acchiapparella</h1>
+    <p>Un cacciatore insegue, tutti gli altri scappano. 45 secondi a round.</p>
+    <form id="join-form">
+      <input id="name-input" type="text" placeholder="Il tuo nome" maxlength="16" required />
+      <button type="submit">Entra in partita</button>
+    </form>
+  </div>
+
+  <div id="game-screen" hidden>
+    <div id="hud">
+      <span id="role-label"></span>
+      <span id="timer-label"></span>
+      <span id="players-label"></span>
+    </div>
+    <canvas id="arena" width="800" height="600"></canvas>
+    <div id="banner" hidden></div>
+    <p class="hint">Muoviti con le frecce, WASD, oppure spingi il TrackPoint mentre il cursore è sopra l'arena</p>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
