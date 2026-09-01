@@ -135,6 +135,18 @@ button {
 
 #players-label { color: var(--muted); }
 
+/* Punteggio della partita 1v1 ("Nome 2–1 Nome"): può essere piuttosto
+   lungo con due nomi di 16 caratteri ognuno, quindi invece di rompere il
+   layout dell'HUD su schermi stretti (fila fissa, altezza bloccata) lo
+   tronca con i tre puntini se non ci sta tutto. */
+#match-score {
+  color: var(--accent);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 canvas {
   background: var(--panel);
   border-radius: 10px;

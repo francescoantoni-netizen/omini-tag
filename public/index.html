@@ -33,7 +33,7 @@
 <body>
   <div id="join-screen">
     <h1>🏃 Acchiapparella</h1>
-    <p>Un cacciatore insegue, tutti gli altri scappano. 45 secondi a round.</p>
+    <p>1 contro 1, al meglio di 5 set: un cacciatore insegue, l'altro scappa. 45 secondi a set, chi arriva a 3 set vinti vince la partita.</p>
     <form id="join-form">
       <input id="name-input" type="text" placeholder="Il tuo nome" maxlength="16" required />
       <button type="submit">Entra in partita</button>
@@ -43,6 +43,7 @@
   <div id="game-screen" hidden>
     <div id="hud">
       <span id="players-label"></span>
+      <span id="match-score"></span>
     </div>
     <canvas id="arena" width="800" height="600"></canvas>
     <div id="banner"></div>

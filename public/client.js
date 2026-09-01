@@ -12,6 +12,7 @@ const gameScreen = document.getElementById('game-screen');
 const canvas = document.getElementById('arena');
 const ctx = canvas.getContext('2d');
 const playersLabel = document.getElementById('players-label');
+const matchScoreLabel = document.getElementById('match-score');
 const banner = document.getElementById('banner');
 const bigCountdown = document.getElementById('big-countdown');
 
@@ -53,13 +54,40 @@ socket.on('fruitEaten', ({ id }) => {
   }
 });
 
-socket.on('roundResult', ({ winner }) => {
-  const msg = winner === 'hunter'
-    ? 'Il cacciatore ha preso tutti! 🎯'
-    : 'I fuggitivi ce l\'hanno fatta! 🏆';
-  flashBanner(msg, 4000);
-  if (winner === 'hunter') playSadTune();
-  else playHappyTune();
+socket.on('roundResult', ({ winner, winnerId, score, matchOver, matchWinnerId, matchWinnerName }) => {
+  // "score" arriva solo quando c'è una vera partita 1v1 in corso (i due
+  // giocatori, con i set vinti finora); se manca (es. caso limite) non
+  // proviamo a mostrare un punteggio inventato
+  const scoreText = score && score.length === 2
+    ? `${score[0].name} ${score[0].sets}–${score[1].sets} ${score[1].name}`
+    : null;
+
+  let msg;
+  if (matchOver) {
+    msg = scoreText
+      ? `🏆 ${matchWinnerName} vince la partita! (${scoreText})`
+      : `🏆 ${matchWinnerName} vince la partita!`;
+  } else {
+    const setMsg = winner === 'hunter'
+      ? 'Il cacciatore ha preso l\'avversario! 🎯'
+      : 'È scappato/a per tutto il round! 🏃';
+    msg = scoreText ? `${setMsg} (${scoreText})` : setMsg;
+  }
+  flashBanner(msg, matchOver ? 5500 : 4000);
+
+  // il suono è personale: lo sentono solo i due giocatori della partita, e
+  // ognuno sente la propria vittoria/sconfitta, non lo stesso audio per tutti
+  const amInMatch = !!(score && score.some((s) => s.id === myId));
+  if (amInMatch) {
+    if (matchOver) {
+      if (matchWinnerId === myId) playMatchWinTune();
+      else playSadTune();
+    } else if (winnerId === myId) {
+      playHappyTune();
+    } else {
+      playSadTune();
+    }
+  }
 });
 
 // Il messaggio di ruolo/fase ("Si parte tra poco…", "Sei stato preso",
@@ -73,17 +101,29 @@ let lastRoleMessage = null;
 function updateHud(state) {
   playersLabel.textContent = `${state.players.length} giocatori`;
 
+  // Punteggio della partita 1v1 in corso (al meglio di 5: chi arriva a 3
+  // set vinti vince) — vuoto quando non c'è una partita attiva, es. si è
+  // ancora in attesa di un secondo giocatore.
+  if (state.match) {
+    const [a, b] = state.match.players;
+    matchScoreLabel.textContent = `${a.name} ${a.sets}–${b.sets} ${b.name}`;
+  } else {
+    matchScoreLabel.textContent = '';
+  }
+
   const me = state.players.find((p) => p.id === myId);
+  const amInMatch = !!(state.match && state.match.players.some((p) => p.id === myId));
   let msg = null;
   if (state.phase === 'waiting') {
-    msg = 'In attesa di altri giocatori…';
+    msg = 'In attesa di un avversario…';
   } else if (state.phase === 'countdown') {
     msg = 'Si parte tra poco…';
   } else if (me) {
-    if (me.role === 'hunter') msg = '🎯 Sei il cacciatore! Prendili tutti.';
+    if (me.role === 'hunter') msg = '🎯 Sei il cacciatore! Prendilo.';
     else if (me.role === 'runner' && me.alive) msg = '🏃 Scappa!';
-    else if (me.role === 'runner' && !me.alive) msg = 'Sei stato preso — guarda il resto del round.';
-    else msg = 'Spettatore, giochi dal prossimo round.';
+    else if (me.role === 'runner' && !me.alive) msg = 'Sei stato preso — guarda il resto del set.';
+    else if (amInMatch) msg = 'In attesa del prossimo set…';
+    else msg = 'Sei spettatore, in attesa che si liberi un posto nella partita 1v1.';
   }
   if (msg && msg !== lastRoleMessage) {
     lastRoleMessage = msg;
@@ -180,6 +220,14 @@ function playHappyTune() {
   // piccolo arpeggio ascendente in maggiore: una mini-fanfara di vittoria
   const notes = [523.25, 659.25, 783.99, 1046.5];
   notes.forEach((freq, i) => playNote(freq, i * 0.12, 0.25));
+}
+
+function playMatchWinTune() {
+  // fanfara più lunga e "piena" del semplice arpeggio di fine set: questa
+  // suona solo a chi ha appena vinto l'intera partita (3 set), non un set
+  // qualsiasi, quindi merita di sentirsi più importante
+  const notes = [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5, 1318.51];
+  notes.forEach((freq, i) => playNote(freq, i * 0.11, 0.3, 0.16));
 }
 
 function playPickupTune() {
