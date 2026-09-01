@@ -6,6 +6,17 @@
   <title>Acchiapparella</title>
   <link rel="stylesheet" href="style.css" />
 
+  <!-- Font "sala giochi anni 80": un font a blocchetti/pixel, usato per
+       tutte le scritte del gioco. Viene da Google Fonts (gratis, nessuna
+       registrazione), quindi qui carichiamo solo un riferimento a un file
+       che sta sui loro server, non un file nostro. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+    rel="stylesheet"
+  />
+
   <!-- Questi permettono di "installare" il gioco sulla schermata Home del
        telefono: aperto da lì (non da un link/segnalibro) il browser non
        mostra più barra degli indirizzi né altri controlli — l'unico modo
@@ -31,12 +42,16 @@
 
   <div id="game-screen" hidden>
     <div id="hud">
-      <span id="role-label"></span>
-      <span id="timer-label"></span>
       <span id="players-label"></span>
     </div>
     <canvas id="arena" width="800" height="600"></canvas>
     <div id="banner"></div>
+
+    <!-- Il conto alla rovescia (3-2-1 prima del via, poi i secondi del
+         round) è un elemento a parte, grosso — non dentro l'HUD — così
+         può stare "galleggiante" sopra il joystick sul telefono, come
+         chiesto. -->
+    <div id="big-countdown"></div>
     <p class="hint">Muoviti con le frecce, WASD, oppure spingi il TrackPoint mentre il cursore è sopra l'arena</p>
 
     <!-- Joystick e avviso di rotazione stanno DENTRO #game-screen apposta:

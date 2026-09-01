@@ -11,10 +11,9 @@ const nameInput = document.getElementById('name-input');
 const gameScreen = document.getElementById('game-screen');
 const canvas = document.getElementById('arena');
 const ctx = canvas.getContext('2d');
-const roleLabel = document.getElementById('role-label');
-const timerLabel = document.getElementById('timer-label');
 const playersLabel = document.getElementById('players-label');
 const banner = document.getElementById('banner');
+const bigCountdown = document.getElementById('big-countdown');
 
 let myId = null;
 let latestState = null;
@@ -44,6 +43,16 @@ socket.on('playerCaught', ({ name }) => {
   flashBanner(`${name} è stato preso!`, 1200);
 });
 
+socket.on('fruitEaten', ({ id }) => {
+  // il "lampeggio"/suono di raccolta è personale: senza questo controllo,
+  // ogni giocatore sentirebbe/vedrebbe il feedback anche quando il frutto
+  // lo mangia qualcun altro, diventando fastidioso in fretta
+  if (id === myId) {
+    flashBanner('🍎 +20% velocità per 5s!', 1400);
+    playPickupTune();
+  }
+});
+
 socket.on('roundResult', ({ winner }) => {
   const msg = winner === 'hunter'
     ? 'Il cacciatore ha preso tutti! 🎯'
@@ -53,24 +62,66 @@ socket.on('roundResult', ({ winner }) => {
   else playHappyTune();
 });
 
+// Il messaggio di ruolo/fase ("Si parte tra poco…", "Sei stato preso",
+// ecc.) non è più una scritta fissa nell'HUD: come chiesto, ora "lampeggia"
+// (compare e si dissolve) come il banner di fine round, invece di restare
+// sempre visibile. Per farlo lampeggiare solo QUANDO cambia (e non a ogni
+// singolo "tick" dello stato, che arriva ~20 volte al secondo) teniamo
+// traccia dell'ultimo messaggio mostrato.
+let lastRoleMessage = null;
+
 function updateHud(state) {
   playersLabel.textContent = `${state.players.length} giocatori`;
 
   const me = state.players.find((p) => p.id === myId);
+  let msg = null;
   if (state.phase === 'waiting') {
-    roleLabel.textContent = 'In attesa di altri giocatori…';
+    msg = 'In attesa di altri giocatori…';
   } else if (state.phase === 'countdown') {
-    roleLabel.textContent = 'Si parte tra poco…';
+    msg = 'Si parte tra poco…';
   } else if (me) {
-    if (me.role === 'hunter') roleLabel.textContent = '🎯 Sei il cacciatore! Prendili tutti.';
-    else if (me.role === 'runner' && me.alive) roleLabel.textContent = '🏃 Scappa!';
-    else if (me.role === 'runner' && !me.alive) roleLabel.textContent = 'Sei stato preso — guarda il resto del round.';
-    else roleLabel.textContent = 'Spettatore, giochi dal prossimo round.';
+    if (me.role === 'hunter') msg = '🎯 Sei il cacciatore! Prendili tutti.';
+    else if (me.role === 'runner' && me.alive) msg = '🏃 Scappa!';
+    else if (me.role === 'runner' && !me.alive) msg = 'Sei stato preso — guarda il resto del round.';
+    else msg = 'Spettatore, giochi dal prossimo round.';
+  }
+  if (msg && msg !== lastRoleMessage) {
+    lastRoleMessage = msg;
+    flashBanner(msg, 2200);
   }
 
-  timerLabel.textContent = state.phase === 'playing' && state.timeLeft != null
-    ? `⏱ ${Math.ceil(state.timeLeft / 1000)}s`
-    : '';
+  updateBigCountdown(state);
+}
+
+// Conto alla rovescia grosso: mostra i secondi del "3…2…1…" prima del via
+// e poi i secondi rimasti nel round, con un piccolo "pop" ad ogni cambio
+// numero per dare energia da sala giochi. Nessuna scritta fissa: appare
+// solo quando c'è davvero un conto alla rovescia in corso.
+let lastCountdownValue = null;
+function updateBigCountdown(state) {
+  let seconds = null;
+  if (state.phase === 'countdown' && state.countdownLeft != null) {
+    seconds = Math.ceil(state.countdownLeft / 1000);
+  } else if (state.phase === 'playing' && state.timeLeft != null) {
+    seconds = Math.ceil(state.timeLeft / 1000);
+  }
+
+  if (seconds === null) {
+    bigCountdown.classList.remove('show');
+    lastCountdownValue = null;
+    return;
+  }
+
+  bigCountdown.classList.add('show');
+  if (seconds !== lastCountdownValue) {
+    lastCountdownValue = seconds;
+    bigCountdown.textContent = state.phase === 'countdown' && seconds <= 0 ? 'VIA!' : String(seconds);
+    // ritogliere e rimettere la classe forza il browser a "ripartire" con
+    // l'animazione da capo invece di ignorarla perché è già attiva
+    bigCountdown.classList.remove('pulse');
+    void bigCountdown.offsetWidth;
+    bigCountdown.classList.add('pulse');
+  }
 }
 
 let bannerTimeout = null;
@@ -129,6 +180,12 @@ function playHappyTune() {
   // piccolo arpeggio ascendente in maggiore: una mini-fanfara di vittoria
   const notes = [523.25, 659.25, 783.99, 1046.5];
   notes.forEach((freq, i) => playNote(freq, i * 0.12, 0.25));
+}
+
+function playPickupTune() {
+  // due note brevi e acute: il classico "blip" di raccolta oggetto
+  playNote(880, 0, 0.08, 0.12);
+  playNote(1174.66, 0.06, 0.12, 0.12);
 }
 
 // ---- Schermo sempre acceso (mobile) ---------------------------------------
@@ -344,6 +401,146 @@ const COLORS = {
   eliminated: '#5a5f6c',
   spectator: '#5a5f6c',
 };
+const PLAYER_RADIUS = 14; // deve restare uguale a quello vero nel server, solo per il disegno
+
+// Per far "camminare" i piedini (si muovono avanti/indietro solo mentre ti
+// sposti davvero) teniamo per ogni giocatore l'ultima posizione vista e una
+// fase di animazione che avanza in base a quanta strada ha fatto.
+const walkState = new Map();
+
+// Scurisce un colore esadecimale (#rrggbb) di una quantità 0-1, per i
+// piedini/ombre — evita di dover scrivere a mano una tinta scura per ogni
+// colore del gioco.
+function darken(hex, amount) {
+  const num = parseInt(hex.slice(1), 16);
+  const r = Math.max(0, ((num >> 16) & 255) * (1 - amount));
+  const g = Math.max(0, ((num >> 8) & 255) * (1 - amount));
+  const b = Math.max(0, (num & 255) * (1 - amount));
+  return `rgb(${r | 0}, ${g | 0}, ${b | 0})`;
+}
+
+// Un "omino" visto dall'alto, in stile chibi/giochino: corpo rotondo,
+// piedini che spuntano da sotto e si muovono camminando, un riflesso
+// lucido e due occhietti — non più un semplice pallino piatto.
+function drawOmino(p) {
+  const color = !p.alive ? COLORS.eliminated : COLORS[p.role] || '#888';
+  const alpha = p.role === 'spectator' || !p.alive ? 0.35 : 1;
+  const R = PLAYER_RADIUS;
+
+  let ws = walkState.get(p.id);
+  if (!ws) {
+    ws = { lastX: p.x, lastY: p.y, phase: 0 };
+    walkState.set(p.id, ws);
+  }
+  const moved = Math.hypot(p.x - ws.lastX, p.y - ws.lastY);
+  if (moved > 0.3) ws.phase += 0.35;
+  ws.lastX = p.x;
+  ws.lastY = p.y;
+  const bob = Math.sin(ws.phase) * 2;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(p.x, p.y);
+
+  // ombra sotto, per dare un po' di "spessore" visto dall'alto
+  ctx.beginPath();
+  ctx.ellipse(0, R * 0.75, R * 0.8, R * 0.35, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+  ctx.fill();
+
+  // piedini: due ovali scuri che spuntano da sotto al corpo e si alternano
+  // leggermente mentre cammina (li teniamo vicino al bordo esatto del
+  // corpo, altrimenti il cerchio disegnato sopra li coprirebbe quasi del
+  // tutto)
+  ctx.fillStyle = darken(color, 0.45);
+  ctx.beginPath();
+  ctx.ellipse(-R * 0.4, R * 0.85 + bob, R * 0.3, R * 0.38, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(R * 0.4, R * 0.85 - bob, R * 0.3, R * 0.38, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // corpo/testa: un unico cerchio morbido stile chibi
+  ctx.beginPath();
+  ctx.arc(0, 0, R, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+
+  // riflesso lucido in alto a sinistra, per un effetto "plastica da giochino"
+  ctx.beginPath();
+  ctx.ellipse(-R * 0.35, -R * 0.4, R * 0.35, R * 0.22, -0.6, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+  ctx.fill();
+
+  // occhietti
+  ctx.fillStyle = '#0b0c10';
+  ctx.beginPath();
+  ctx.arc(-R * 0.32, -R * 0.05, R * 0.13, 0, Math.PI * 2);
+  ctx.arc(R * 0.32, -R * 0.05, R * 0.13, 0, Math.PI * 2);
+  ctx.fill();
+
+  // contorno bianco: "questo sei tu"
+  if (p.id === myId) {
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(0, 0, R + 2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // anello dorato pulsante: "ho mangiato un frutto, sono più veloce" — si
+  // vede anche sugli altri giocatori, non solo su di te, così tutti
+  // capiscono al volo chi ha il boost attivo in questo momento
+  if (p.boosted) {
+    const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 100);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = `rgba(255, 200, 60, ${0.5 + 0.4 * pulse})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, R + 6 + pulse * 2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  // nome sopra la testa
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#e8eaf0';
+  ctx.font = '10px "Press Start 2P", system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText(p.name, p.x, p.y - R - 10);
+}
+
+// Frutto col boost: corpo arancio/dorato (colore diverso apposta dal rosso
+// del cacciatore, per non confonderli a colpo d'occhio), con un piccolo
+// "respiro" (si ingrandisce e rimpicciolisce leggermente) che lo fa notare
+// come oggetto raccoglibile invece che un elemento fisso della mappa.
+function drawFruit(f) {
+  const pulse = 1 + 0.08 * Math.sin(Date.now() / 250 + f.id);
+  const r = 9 * pulse;
+
+  ctx.save();
+  ctx.translate(f.x, f.y);
+
+  // fogliolina
+  ctx.fillStyle = '#4caf50';
+  ctx.beginPath();
+  ctx.ellipse(3, -r * 1.1, 4, 2.2, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // corpo del frutto
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffb648';
+  ctx.fill();
+
+  // riflesso
+  ctx.beginPath();
+  ctx.ellipse(-r * 0.3, -r * 0.3, r * 0.3, r * 0.18, -0.6, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.fill();
+
+  ctx.restore();
+}
 
 function draw() {
   requestAnimationFrame(draw);
@@ -357,27 +554,22 @@ function draw() {
     ctx.fillRect(o.x, o.y, o.w, o.h);
   }
 
+  // frutti: disegnati PRIMA dei giocatori, così chi ci cammina sopra
+  // sembra passarci davanti invece che sopra
+  for (const f of latestState.fruits || []) {
+    drawFruit(f);
+  }
+
+  // dimentica gli omini di chi si è disconnesso, altrimenti la mappa
+  // walkState crescerebbe all'infinito partita dopo partita
+  const currentIds = new Set(latestState.players.map((p) => p.id));
+  for (const id of walkState.keys()) {
+    if (!currentIds.has(id)) walkState.delete(id);
+  }
+
   // giocatori
   for (const p of latestState.players) {
-    const color = !p.alive ? COLORS.eliminated : COLORS[p.role] || '#888';
-    ctx.globalAlpha = p.role === 'spectator' || !p.alive ? 0.35 : 1;
-
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 14, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
-
-    if (p.id === myId) {
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#ffffff';
-      ctx.stroke();
-    }
-
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = '#e8eaf0';
-    ctx.font = '12px system-ui';
-    ctx.textAlign = 'center';
-    ctx.fillText(p.name, p.x, p.y - 22);
+    drawOmino(p);
   }
 }
 requestAnimationFrame(draw);

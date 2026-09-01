@@ -7,6 +7,13 @@
   --runner: #4f9dfd;
   --text: #e8eaf0;
   --muted: #8a8f9c;
+
+  /* Posizione del joystick, calcolata una sola volta qui: la riusiamo per
+     mettere il conto alla rovescia esattamente sopra di lui, senza
+     duplicare gli stessi numeri in due punti diversi del file. */
+  --joy-offset-left: max(28px, calc(env(safe-area-inset-left) + 16px));
+  --joy-offset-bottom: max(28px, calc(env(safe-area-inset-bottom) + 16px));
+  --joy-size: 120px;
 }
 
 * { box-sizing: border-box; }
@@ -28,7 +35,11 @@ body {
   justify-content: center;
   background: var(--bg) url('cover.jpg') center / cover no-repeat;
   color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Font "sala giochi anni 80" per TUTTE le scritte del gioco. Tenendo
+     comunque un font normale come ripiego (dopo la virgola): se per
+     qualche motivo Google Fonts non si carica, il gioco resta comunque
+     leggibile invece di rompersi. */
+  font-family: 'Press Start 2P', system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 #join-screen {
@@ -44,8 +55,20 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-#join-screen h1 { margin-bottom: 4px; }
-#join-screen p { color: var(--muted); margin-bottom: 20px; }
+/* Il font pixel è molto più "largo" per carattere di un font normale, a
+   parità di font-size sembra enorme — per questo qui sotto le dimensioni
+   sono tutte più piccole di quelle originali. */
+#join-screen h1 {
+  font-size: 20px;
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+#join-screen p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.8;
+  margin-bottom: 22px;
+}
 
 #join-form {
   display: flex;
@@ -59,7 +82,8 @@ body {
   border: 1px solid #33384433;
   background: var(--panel);
   color: var(--text);
-  font-size: 15px;
+  font-family: inherit;
+  font-size: 11px;
 }
 
 button {
@@ -68,7 +92,8 @@ button {
   border: none;
   background: var(--accent);
   color: #0b1310;
-  font-weight: 600;
+  font-family: inherit;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -99,20 +124,15 @@ button {
   display: flex;
   align-items: center;
   gap: 20px;
-  font-size: 15px;
-  /* Altezza FISSA (non solo minima) con "overflow: hidden": i testi che
-     cambiano qui dentro ("Si parte tra poco…", "Sei stato preso — guarda
-     il resto del round.", ecc.) hanno lunghezze molto diverse — se
-     l'altezza dell'HUD potesse crescere quando un testo va a capo,
-     spingerebbe giù l'arena sotto e farebbe "saltare" lo schermo, lo
-     stesso identico problema che avevamo con il banner. Fissandola qui,
-     l'arena resta sempre nello stesso punto qualunque sia il testo. */
-  height: 42px;
+  font-size: 10px;
+  /* Altezza fissa: anche se qui dentro è rimasto solo il conteggio
+     giocatori (il resto ora "lampeggia" altrove), teniamo comunque
+     un'altezza bloccata per sicurezza — non deve mai essere lei a
+     spostare l'arena sotto. */
+  height: 30px;
   overflow: hidden;
 }
 
-#role-label { font-weight: 600; }
-#timer-label { color: var(--muted); }
 #players-label { color: var(--muted); }
 
 canvas {
@@ -132,10 +152,13 @@ canvas {
   top: max(16px, calc(env(safe-area-inset-top) + 10px));
   left: 50%;
   z-index: 20;
-  padding: 10px 18px;
+  max-width: min(90vw, 440px);
+  padding: 12px 18px;
   border-radius: 8px;
   background: var(--panel);
-  font-weight: 600;
+  font-size: 11px;
+  line-height: 1.7;
+  text-align: center;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   /* nascosto/mostrato con una dissolvenza invece che con uno scatto secco */
   opacity: 0;
@@ -151,7 +174,43 @@ canvas {
 
 .hint {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 9px;
+  line-height: 1.8;
+}
+
+/* ---- Conto alla rovescia grosso ---------------------------------------- */
+/* Su PC sta in alto al centro, sopra l'arena. Su telefono (vedi media
+   query più sotto) si sposta invece proprio sopra al joystick, come
+   richiesto — usa le stesse variabili --joy-* definite in cima al file,
+   quindi resta sempre perfettamente allineato con lui. */
+#big-countdown {
+  position: fixed;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  font-size: 40px;
+  color: var(--accent);
+  text-shadow: 0 0 14px rgba(79, 209, 197, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+#big-countdown.show {
+  opacity: 1;
+}
+
+/* Piccolo "pop": ogni volta che il numero cambia, questa animazione
+   riparte da capo (client.js la ri-attiva togliendo e rimettendo la
+   classe) — dà quella sensazione di energia da sala giochi invece di un
+   numero che cambia in modo piatto. */
+@keyframes countdown-pop {
+  0% { transform: translateX(-50%) scale(1.35); }
+  100% { transform: translateX(-50%) scale(1); }
+}
+#big-countdown.pulse {
+  animation: countdown-pop 0.2s ease-out;
 }
 
 /* ---- Joystick touch (solo dispositivi touch) --------------------------- */
@@ -193,7 +252,7 @@ canvas {
   }
 
   #hud {
-    font-size: 13px;
+    font-size: 9px;
   }
 
   canvas {
@@ -208,19 +267,29 @@ canvas {
   #joystick {
     display: block;
     position: fixed;
-    /* env(safe-area-inset-*) tiene il joystick lontano dal "notch"/isola
-       dinamica o dagli angoli arrotondati quando il telefono è in
-       orizzontale — su un telefono senza queste zone equivale sempre a 0,
-       quindi non cambia nulla su schermi normali. */
-    left: max(28px, calc(env(safe-area-inset-left) + 16px));
-    bottom: max(28px, calc(env(safe-area-inset-bottom) + 16px));
-    width: 120px;
-    height: 120px;
+    /* le variabili --joy-* (env(safe-area-inset-*) incluso) sono definite
+       in cima al file: tengono il joystick lontano dal "notch"/isola
+       dinamica quando il telefono è in orizzontale, e sono riusate anche
+       dal conto alla rovescia qui sotto per restarci sempre allineato. */
+    left: var(--joy-offset-left);
+    bottom: var(--joy-offset-bottom);
+    width: var(--joy-size);
+    height: var(--joy-size);
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.06);
     border: 2px solid rgba(255, 255, 255, 0.15);
     touch-action: none;
     z-index: 5;
+  }
+
+  /* Il conto alla rovescia si sposta qui sopra al joystick invece che in
+     cima allo schermo, come chiesto — resta sempre allineato con lui
+     perché usa le stesse identiche variabili. */
+  #big-countdown {
+    top: auto;
+    left: calc(var(--joy-offset-left) + var(--joy-size) / 2);
+    bottom: calc(var(--joy-offset-bottom) + var(--joy-size) + 14px);
+    font-size: 32px;
   }
 
   #joystick-knob {
@@ -258,6 +327,7 @@ canvas {
     justify-content: center;
     text-align: center;
     padding: 32px;
-    font-size: 16px;
+    font-size: 12px;
+    line-height: 1.9;
   }
 }
