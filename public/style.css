@@ -11,6 +11,15 @@
 
 * { box-sizing: border-box; }
 
+/* Niente scroll/rimbalzo della pagina: il gioco è pensato per stare tutto
+   in una schermata, quindi se il dito tocca fuori dai controlli (es. sulla
+   schermata del nome) non deve muovere la pagina su e giù. */
+html, body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -104,6 +113,49 @@ canvas {
 }
 
 @media (hover: none) and (pointer: coarse) {
+  /* L'arena è 800x600 (rapporto 4:3) — su un telefono, specie in
+     orizzontale molto più largo che alto, se il canvas si adattasse alla
+     LARGHEZZA dello schermo diventerebbe enorme (più grande dello schermo
+     stesso) e finirebbe sotto al joystick, o addirittura tagliato fuori
+     dalla vista. Facendolo adattare invece all'ALTEZZA disponibile, resta
+     "quadratino" e centrato, lasciando libere le fasce ai lati per il
+     joystick, senza sovrapposizioni. */
+  #game-screen {
+    /* 100dvh (dynamic viewport height) invece di 100vh: su telefono la
+       barra degli indirizzi appare/scompare e cambia quanto schermo è
+       davvero visibile — 100vh da solo a volte considera anche lo spazio
+       coperto dalla barra, facendo traboccare/tagliare il contenuto.
+       Scriviamo prima 100vh come ripiego per i browser più vecchi, poi
+       100dvh: se il browser la conosce la usa, altrimenti ignora la riga
+       e resta valida quella sopra. */
+    height: 100vh;
+    height: 100dvh;
+    justify-content: center;
+    padding: 4px;
+    gap: 4px;
+    /* niente selezione testo/menu "copia" al tocco lungo, e niente
+       "callout" (il popup che iOS mostra tenendo premuto un elemento) —
+       senza questo, un dito fermo troppo a lungo sul joystick rischia di
+       aprire un menu di sistema invece di continuare a muoversi */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  #hud {
+    min-height: 18px;
+    font-size: 13px;
+  }
+
+  canvas {
+    height: calc(100vh - 30px);
+    height: calc(100dvh - 30px);
+    max-height: calc(100vh - 30px);
+    max-height: calc(100dvh - 30px);
+    width: auto;
+    max-width: 100%;
+  }
+
   #joystick {
     display: block;
     position: fixed;
@@ -137,46 +189,6 @@ canvas {
   /* su touch il testo "muoviti con le frecce..." non serve più */
   .hint {
     display: none;
-  }
-
-  #game-screen {
-    padding: 8px;
-    /* niente selezione testo/menu "copia" al tocco lungo, e niente
-       "callout" (il popup che iOS mostra tenendo premuto un elemento) —
-       senza questo, un dito fermo troppo a lungo sul joystick rischia di
-       aprire un menu di sistema invece di continuare a muoversi */
-    -webkit-user-select: none;
-    user-select: none;
-    -webkit-touch-callout: none;
-  }
-}
-
-/* ---- Layout in orizzontale su telefono: l'arena non deve sparire sotto
-   il joystick ------------------------------------------------------------ */
-/* L'arena è 800x600 (rapporto 4:3) — su un telefono in orizzontale, molto
-   più largo che alto, se il canvas si adattasse alla LARGHEZZA dello
-   schermo diventerebbe enorme e finirebbe proprio sotto al joystick.
-   Facendolo adattare invece all'ALTEZZA disponibile, resta "quadratino" e
-   centrato, lasciando libere le due fasce ai lati — lì dove sta il
-   joystick, senza sovrapporsi mai all'area di gioco vera. */
-@media (hover: none) and (pointer: coarse) and (orientation: landscape) {
-  #game-screen {
-    height: 100vh;
-    justify-content: center;
-    padding: 4px;
-    gap: 4px;
-  }
-
-  #hud {
-    min-height: 18px;
-    font-size: 13px;
-  }
-
-  canvas {
-    height: calc(100vh - 30px);
-    max-height: calc(100vh - 30px);
-    width: auto;
-    max-width: 100%;
   }
 }
 

@@ -25,10 +25,8 @@ joinForm.addEventListener('submit', async (e) => {
   joinScreen.hidden = true;
   gameScreen.hidden = false;
   // Il click sul bottone "Entra in partita" è un gesto dell'utente: è
-  // l'unico momento in cui il browser ci permette di chiedere fullscreen /
-  // blocco orientamento / schermo sempre acceso. Se lo facessimo dopo,
-  // senza un click appena avvenuto, il browser rifiuterebbe la richiesta.
-  await tryLockLandscape();
+  // l'unico momento in cui il browser ci permette di chiedere lo schermo
+  // sempre acceso.
   await tryKeepScreenAwake();
 });
 
@@ -80,26 +78,12 @@ function flashBanner(text, ms) {
   bannerTimeout = setTimeout(() => { banner.hidden = true; }, ms);
 }
 
-// ---- Orientamento orizzontale e schermo sempre acceso (mobile) -----------
-// Bloccare davvero l'orientamento è "best effort": funziona su Chrome
-// Android (e di solito richiede prima il fullscreen), ma su Safari/iPhone
-// questa API web non esiste affatto — per questo teniamo comunque
-// l'avviso "ruota il telefono" (in index.html/style.css) come soluzione
-// che funziona sempre, ovunque questo tentativo fallisca in silenzio.
-async function tryLockLandscape() {
-  const isTouch = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
-  if (!isTouch) return;
-  try {
-    if (document.documentElement.requestFullscreen) {
-      await document.documentElement.requestFullscreen();
-    }
-    if (screen.orientation && screen.orientation.lock) {
-      await screen.orientation.lock('landscape');
-    }
-  } catch (err) {
-    // niente di grave: restiamo con l'avviso di ruotare il telefono a mano
-  }
-}
+// ---- Schermo sempre acceso (mobile) ---------------------------------------
+// Non proviamo più a forzare l'orientamento orizzontale via JS (fullscreen +
+// screen.orientation.lock): su alcuni telefoni/browser mandava in confusione
+// il ridimensionamento della pagina. Restiamo con la soluzione più semplice
+// e affidabile ovunque: il CSS adatta l'arena allo schermo disponibile, e se
+// il telefono è in verticale mostriamo l'avviso di ruotarlo a mano.
 
 // Il telefono spegnerebbe lo schermo per inattività, ma durante la partita
 // non stai "toccando" lo schermo in continuazione (tieni il dito fermo sul

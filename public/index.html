@@ -25,14 +25,19 @@
     <canvas id="arena" width="800" height="600"></canvas>
     <div id="banner" hidden></div>
     <p class="hint">Muoviti con le frecce, WASD, oppure spingi il TrackPoint mentre il cursore è sopra l'arena</p>
-  </div>
 
-  <div id="joystick">
-    <div id="joystick-knob"></div>
-  </div>
+    <!-- Joystick e avviso di rotazione stanno DENTRO #game-screen apposta:
+         così, finché sei sulla schermata "inserisci il nome", ereditano
+         l'attributo "hidden" del genitore e restano invisibili — niente
+         joystick sopra il campo del nome prima ancora di essere entrati
+         in partita. -->
+    <div id="joystick">
+      <div id="joystick-knob"></div>
+    </div>
 
-  <div id="rotate-hint">
-    <p>📱 Ruota il telefono in orizzontale per giocare meglio</p>
+    <div id="rotate-hint">
+      <p>📱 Ruota il telefono in orizzontale per giocare meglio</p>
+    </div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
