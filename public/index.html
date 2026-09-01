@@ -31,18 +31,76 @@
   <meta name="apple-mobile-web-app-title" content="Acchiapparella" />
 </head>
 <body>
-  <div id="join-screen">
+  <!-- ---- Schermata di login/registrazione/reset password --------------- -->
+  <div id="auth-screen">
     <h1>🏃 Acchiapparella</h1>
-    <p>1 contro 1, al meglio di 5 set: un cacciatore insegue, l'altro scappa. 45 secondi a set, chi arriva a 3 set vinti vince la partita.</p>
-    <form id="join-form">
-      <input id="name-input" type="text" placeholder="Il tuo nome" maxlength="16" required />
-      <button type="submit">Entra in partita</button>
+    <p>1 contro 1, al meglio di 5 set: un cacciatore insegue, l'altro scappa.
+       Registrati, poi trova un avversario o invita un amico.</p>
+
+    <form id="login-form" class="auth-form">
+      <input id="login-id" type="text" placeholder="Username o email" autocomplete="username" required />
+      <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" required />
+      <button type="submit">Accedi</button>
+      <p class="auth-links">
+        <a href="#" data-show="register-form">Non hai un account? Registrati</a>
+        <a href="#" data-show="forgot-form">Password dimenticata?</a>
+      </p>
     </form>
+
+    <form id="register-form" class="auth-form" hidden>
+      <input id="register-username" type="text" placeholder="Username (3-20 caratteri)" autocomplete="username" required />
+      <input id="register-email" type="email" placeholder="Email" autocomplete="email" required />
+      <input id="register-password" type="password" placeholder="Password (min 8 caratteri)" autocomplete="new-password" required />
+      <button type="submit">Crea account</button>
+      <p class="auth-links"><a href="#" data-show="login-form">Hai già un account? Accedi</a></p>
+    </form>
+
+    <form id="forgot-form" class="auth-form" hidden>
+      <input id="forgot-email" type="email" placeholder="La tua email" autocomplete="email" required />
+      <button type="submit">Mandami il link per reimpostarla</button>
+      <p class="auth-links"><a href="#" data-show="login-form">Torna al login</a></p>
+    </form>
+
+    <form id="reset-form" class="auth-form" hidden>
+      <p class="hint">Scegli una nuova password:</p>
+      <input id="reset-password" type="password" placeholder="Nuova password (min 8 caratteri)" autocomplete="new-password" required />
+      <button type="submit">Reimposta password</button>
+    </form>
+
+    <p id="auth-message" class="auth-message" hidden></p>
+  </div>
+
+  <!-- ---- Lobby: trova avversario / invita un amico ---------------------- -->
+  <div id="lobby-screen" hidden>
+    <h1>🏃 Acchiapparella</h1>
+    <p id="lobby-welcome"></p>
+    <p id="lobby-stats" class="hint"></p>
+
+    <div id="lobby-idle" class="auth-form">
+      <button id="find-opponent-btn">🔍 Trova avversario</button>
+      <form id="invite-form">
+        <input id="invite-username" type="text" placeholder="Username amico" maxlength="20" />
+        <button type="submit">Invita</button>
+      </form>
+    </div>
+
+    <div id="lobby-queued" class="auth-form" hidden>
+      <p>In coda, in attesa di un avversario…</p>
+      <button id="cancel-queue-btn">Annulla</button>
+    </div>
+
+    <div id="lobby-invite-incoming" class="auth-form" hidden>
+      <p id="lobby-invite-text"></p>
+      <button id="accept-invite-btn">Accetta</button>
+      <button id="decline-invite-btn">Rifiuta</button>
+    </div>
+
+    <p id="lobby-message" class="auth-message" hidden></p>
+    <button id="logout-btn" class="link-button">Esci</button>
   </div>
 
   <div id="game-screen" hidden>
     <div id="hud">
-      <span id="players-label"></span>
       <span id="match-score"></span>
     </div>
     <canvas id="arena" width="800" height="600"></canvas>
@@ -56,10 +114,8 @@
     <p class="hint">Muoviti con le frecce, WASD, oppure spingi il TrackPoint mentre il cursore è sopra l'arena</p>
 
     <!-- Joystick e avviso di rotazione stanno DENTRO #game-screen apposta:
-         così, finché sei sulla schermata "inserisci il nome", ereditano
-         l'attributo "hidden" del genitore e restano invisibili — niente
-         joystick sopra il campo del nome prima ancora di essere entrati
-         in partita. -->
+         così, finché sei su un'altra schermata, ereditano l'attributo
+         "hidden" del genitore e restano invisibili. -->
     <div id="joystick">
       <div id="joystick-knob"></div>
     </div>

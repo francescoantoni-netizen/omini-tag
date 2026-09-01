@@ -42,7 +42,7 @@ body {
   font-family: 'Press Start 2P', system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-#join-screen {
+#auth-screen, #lobby-screen {
   text-align: center;
   max-width: 360px;
   padding: 24px 28px;
@@ -58,25 +58,25 @@ body {
 /* Il font pixel è molto più "largo" per carattere di un font normale, a
    parità di font-size sembra enorme — per questo qui sotto le dimensioni
    sono tutte più piccole di quelle originali. */
-#join-screen h1 {
+#auth-screen h1, #lobby-screen h1 {
   font-size: 20px;
   line-height: 1.5;
   margin-bottom: 14px;
 }
-#join-screen p {
+#auth-screen > p, #lobby-screen > p {
   color: var(--muted);
   font-size: 10px;
   line-height: 1.8;
   margin-bottom: 22px;
 }
 
-#join-form {
+.auth-form {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
 }
 
-#name-input {
-  flex: 1;
+.auth-form input {
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid #33384433;
@@ -84,6 +84,65 @@ body {
   color: var(--text);
   font-family: inherit;
   font-size: 11px;
+}
+
+.auth-form #invite-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.auth-form #invite-form input {
+  flex: 1;
+}
+
+.auth-links {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 9px;
+}
+.auth-links a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.auth-links a:hover {
+  text-decoration: underline;
+}
+
+.auth-message {
+  margin-top: 14px;
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--text);
+}
+.auth-message.error {
+  color: var(--hunter);
+}
+
+.link-button {
+  margin-top: 18px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 9px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px;
+}
+
+#lobby-welcome {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+#lobby-stats {
+  margin-bottom: 20px;
+}
+
+#lobby-invite-incoming {
+  flex-direction: row;
+  justify-content: center;
 }
 
 button {
@@ -95,6 +154,11 @@ button {
   font-family: inherit;
   font-size: 11px;
   cursor: pointer;
+}
+
+#decline-invite-btn {
+  background: var(--hunter);
+  color: #fff;
 }
 
 #game-screen {
@@ -123,17 +187,17 @@ button {
 #hud {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 20px;
   font-size: 10px;
-  /* Altezza fissa: anche se qui dentro è rimasto solo il conteggio
-     giocatori (il resto ora "lampeggia" altrove), teniamo comunque
-     un'altezza bloccata per sicurezza — non deve mai essere lei a
-     spostare l'arena sotto. */
+  /* Altezza fissa: anche se qui dentro è rimasto solo il punteggio della
+     partita (il resto "lampeggia" altrove), teniamo comunque un'altezza
+     bloccata per sicurezza — non deve mai essere lei a spostare l'arena
+     sotto. */
   height: 30px;
   overflow: hidden;
+  width: 100%;
 }
-
-#players-label { color: var(--muted); }
 
 /* Punteggio della partita 1v1 ("Nome 2–1 Nome"): può essere piuttosto
    lungo con due nomi di 16 caratteri ognuno, quindi invece di rompere il

@@ -1,109 +1,359 @@
-// client.js — disegna quello che il server manda e invia i tasti premuti.
-// Il client NON decide chi vince o dove si trova nessuno: manda solo
-// l'input, e disegna lo stato che riceve indietro. Tutta la logica di
-// gioco vive in server.js.
+// client.js — login/registrazione, lobby (coda/inviti), e poi la partita
+// vera e propria: disegna quello che il server manda e invia i tasti
+// premuti. Il client NON decide chi vince o dove si trova nessuno: manda
+// solo l'input, e disegna lo stato che riceve indietro. Tutta la logica di
+// gioco vive in server.js/game.js.
 
-const socket = io();
-
-const joinScreen = document.getElementById('join-screen');
-const joinForm = document.getElementById('join-form');
-const nameInput = document.getElementById('name-input');
+// ---- Riferimenti agli elementi delle tre schermate -------------------------
+const authScreen = document.getElementById('auth-screen');
+const lobbyScreen = document.getElementById('lobby-screen');
 const gameScreen = document.getElementById('game-screen');
+
+const loginForm = document.getElementById('login-form');
+const registerForm = document.getElementById('register-form');
+const forgotForm = document.getElementById('forgot-form');
+const resetForm = document.getElementById('reset-form');
+const authMessage = document.getElementById('auth-message');
+
+const lobbyWelcome = document.getElementById('lobby-welcome');
+const lobbyStats = document.getElementById('lobby-stats');
+const lobbyIdle = document.getElementById('lobby-idle');
+const lobbyQueued = document.getElementById('lobby-queued');
+const lobbyInviteIncoming = document.getElementById('lobby-invite-incoming');
+const lobbyInviteText = document.getElementById('lobby-invite-text');
+const lobbyMessage = document.getElementById('lobby-message');
+const findOpponentBtn = document.getElementById('find-opponent-btn');
+const cancelQueueBtn = document.getElementById('cancel-queue-btn');
+const inviteForm = document.getElementById('invite-form');
+const inviteUsernameInput = document.getElementById('invite-username');
+const acceptInviteBtn = document.getElementById('accept-invite-btn');
+const declineInviteBtn = document.getElementById('decline-invite-btn');
+const logoutBtn = document.getElementById('logout-btn');
+
 const canvas = document.getElementById('arena');
 const ctx = canvas.getContext('2d');
-const playersLabel = document.getElementById('players-label');
 const matchScoreLabel = document.getElementById('match-score');
 const banner = document.getElementById('banner');
 const bigCountdown = document.getElementById('big-countdown');
 
+function showScreen(name) {
+  authScreen.hidden = name !== 'auth';
+  lobbyScreen.hidden = name !== 'lobby';
+  gameScreen.hidden = name !== 'game';
+}
+
+function showAuthForm(name) {
+  loginForm.hidden = name !== 'login-form';
+  registerForm.hidden = name !== 'register-form';
+  forgotForm.hidden = name !== 'forgot-form';
+  resetForm.hidden = name !== 'reset-form';
+  authMessage.hidden = true;
+}
+
+function setMessage(el, text, isError) {
+  el.textContent = text;
+  el.hidden = false;
+  el.classList.toggle('error', !!isError);
+}
+
+for (const link of document.querySelectorAll('[data-show]')) {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    showAuthForm(link.dataset.show);
+  });
+}
+
+// ---- Chiamate all'API di autenticazione ------------------------------------
+async function api(path, body) {
+  const res = await fetch(`/api/auth/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(body || {}),
+  });
+  const json = await res.json().catch(() => ({}));
+  return { ok: res.ok, json };
+}
+
+let currentUser = null;
+
+function renderLobby() {
+  if (!currentUser) return;
+  lobbyWelcome.textContent = `Ciao, ${currentUser.username}!`;
+  const s = currentUser.stats;
+  const totalMatches = s.wins + s.losses;
+  lobbyStats.textContent = totalMatches === 0
+    ? 'Non hai ancora giocato nessuna partita.'
+    : `${s.wins} vinte, ${s.losses} perse (${totalMatches} partit${totalMatches === 1 ? 'a' : 'e'}) — set: ${s.setsWon}-${s.setsLost}`;
+}
+
+function showLobbyIdle() {
+  lobbyIdle.hidden = false;
+  lobbyQueued.hidden = true;
+  lobbyInviteIncoming.hidden = true;
+}
+
+async function refreshMe() {
+  const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+  if (!res.ok) return null;
+  const { user } = await res.json();
+  currentUser = user;
+  renderLobby();
+  return user;
+}
+
+// ---- Login / registrazione / reset password --------------------------------
+loginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  unlockMediaOnce();
+  const { ok, json } = await api('login', {
+    emailOrUsername: document.getElementById('login-id').value.trim(),
+    password: document.getElementById('login-password').value,
+  });
+  if (!ok) return setMessage(authMessage, json.error || 'Accesso non riuscito.', true);
+  currentUser = json.user;
+  connectSocket();
+  renderLobby();
+  showLobbyIdle();
+  showScreen('lobby');
+});
+
+registerForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const { ok, json } = await api('register', {
+    username: document.getElementById('register-username').value.trim(),
+    email: document.getElementById('register-email').value.trim(),
+    password: document.getElementById('register-password').value,
+  });
+  if (!ok) return setMessage(authMessage, json.error || 'Registrazione non riuscita.', true);
+  registerForm.reset();
+  showAuthForm('login-form');
+  setMessage(authMessage, json.message, false);
+});
+
+forgotForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const { ok, json } = await api('request-password-reset', {
+    email: document.getElementById('forgot-email').value.trim(),
+  });
+  forgotForm.reset();
+  setMessage(authMessage, json.message || (ok ? 'Controlla la tua email.' : 'Qualcosa è andato storto.'), !ok);
+});
+
+let pendingResetToken = null;
+resetForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const { ok, json } = await api('reset-password', {
+    token: pendingResetToken,
+    newPassword: document.getElementById('reset-password').value,
+  });
+  if (!ok) return setMessage(authMessage, json.error || 'Reset non riuscito.', true);
+  pendingResetToken = null;
+  resetForm.reset();
+  showAuthForm('login-form');
+  setMessage(authMessage, json.message, false);
+});
+
+logoutBtn.addEventListener('click', async () => {
+  if (socket) socket.close();
+  socket = null;
+  await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+  currentUser = null;
+  loginForm.reset();
+  showAuthForm('login-form');
+  showScreen('auth');
+});
+
+// ---- Avvio: login già fatto? link di verifica/reset nell'URL? -------------
+async function init() {
+  const params = new URLSearchParams(location.search);
+  const verifyToken = params.get('verifyToken');
+  const resetToken = params.get('resetToken');
+  if (verifyToken || resetToken) {
+    // toglie il token dalla barra degli indirizzi: non deve restarci
+    // visibile/ricondivisibile una volta usato
+    history.replaceState(null, '', location.pathname);
+  }
+
+  if (verifyToken) {
+    const { ok, json } = await api('verify-email', { token: verifyToken });
+    showAuthForm('login-form');
+    setMessage(authMessage, json.message || json.error, !ok);
+  } else if (resetToken) {
+    pendingResetToken = resetToken;
+    showAuthForm('reset-form');
+  }
+
+  const user = await refreshMe();
+  if (user) {
+    connectSocket();
+    showLobbyIdle();
+    showScreen('lobby');
+  } else if (!verifyToken && !resetToken) {
+    showAuthForm('login-form');
+    showScreen('auth');
+  } else {
+    showScreen('auth');
+  }
+}
+init();
+
+// ---- Lobby: trova avversario / invita un amico -----------------------------
+findOpponentBtn.addEventListener('click', () => {
+  unlockMediaOnce();
+  lobbyMessage.hidden = true;
+  socket.emit('findOpponent');
+});
+
+cancelQueueBtn.addEventListener('click', () => {
+  socket.emit('cancelFindOpponent');
+});
+
+inviteForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const username = inviteUsernameInput.value.trim();
+  if (!username) return;
+  unlockMediaOnce();
+  lobbyMessage.hidden = true;
+  socket.emit('inviteFriend', { username });
+});
+
+let currentInviteId = null;
+acceptInviteBtn.addEventListener('click', () => {
+  unlockMediaOnce();
+  socket.emit('respondInvite', { inviteId: currentInviteId, accept: true });
+  showLobbyIdle();
+});
+declineInviteBtn.addEventListener('click', () => {
+  socket.emit('respondInvite', { inviteId: currentInviteId, accept: false });
+  showLobbyIdle();
+});
+
+// ---- Socket.io: solo dopo il login --------------------------------------
+let socket = null;
 let myId = null;
 let latestState = null;
 
-joinForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  socket.emit('join', nameInput.value.trim() || 'Omino');
-  joinScreen.hidden = true;
-  gameScreen.hidden = false;
-  // Il click sul bottone "Entra in partita" è un gesto dell'utente: è
-  // l'unico momento in cui il browser ci permette di chiedere lo schermo
-  // sempre acceso, ed è anche l'unico momento in cui può partire l'audio.
-  await tryKeepScreenAwake();
-  initAudio();
-});
+function connectSocket() {
+  if (socket) return;
+  socket = io();
 
-socket.on('joined', ({ id }) => {
-  myId = id;
-});
+  socket.on('connect', () => { myId = socket.id; });
 
-socket.on('state', (state) => {
-  latestState = state;
-  updateHud(state);
-});
+  socket.on('queued', () => {
+    lobbyIdle.hidden = true;
+    lobbyQueued.hidden = false;
+    lobbyInviteIncoming.hidden = true;
+  });
+  socket.on('queueCancelled', () => showLobbyIdle());
 
-socket.on('playerCaught', ({ name }) => {
-  flashBanner(`${name} è stato preso!`, 1200);
-});
+  socket.on('inviteSent', ({ toUsername }) => {
+    inviteForm.reset();
+    setMessage(lobbyMessage, `Invito mandato a ${toUsername}, in attesa di risposta…`, false);
+  });
+  socket.on('inviteError', ({ message }) => {
+    showLobbyIdle();
+    setMessage(lobbyMessage, message, true);
+  });
+  socket.on('inviteReceived', ({ inviteId, fromUsername }) => {
+    currentInviteId = inviteId;
+    lobbyInviteText.textContent = `${fromUsername} ti ha invitato a giocare!`;
+    lobbyIdle.hidden = true;
+    lobbyQueued.hidden = true;
+    lobbyInviteIncoming.hidden = false;
+  });
+  socket.on('inviteDeclined', ({ byUsername }) => {
+    showLobbyIdle();
+    setMessage(lobbyMessage, `${byUsername} ha rifiutato l'invito.`, true);
+  });
+  socket.on('inviteExpired', ({ fromUsername }) => {
+    showLobbyIdle();
+    setMessage(lobbyMessage, `L'invito di ${fromUsername} è scaduto.`, true);
+  });
 
-socket.on('fruitEaten', ({ id }) => {
-  // il "lampeggio"/suono di raccolta è personale: senza questo controllo,
-  // ogni giocatore sentirebbe/vedrebbe il feedback anche quando il frutto
-  // lo mangia qualcun altro, diventando fastidioso in fretta
-  if (id === myId) {
-    flashBanner('🍎 +20% velocità per 5s!', 1400);
-    playPickupTune();
-  }
-});
+  socket.on('kicked', ({ message }) => {
+    socket = null;
+    currentUser = null;
+    showAuthForm('login-form');
+    setMessage(authMessage, message, true);
+    showScreen('auth');
+  });
 
-socket.on('roundResult', ({ winner, winnerId, score, matchOver, matchWinnerId, matchWinnerName }) => {
-  // "score" arriva solo quando c'è una vera partita 1v1 in corso (i due
-  // giocatori, con i set vinti finora); se manca (es. caso limite) non
-  // proviamo a mostrare un punteggio inventato
-  const scoreText = score && score.length === 2
-    ? `${score[0].name} ${score[0].sets}–${score[1].sets} ${score[1].name}`
-    : null;
+  socket.on('matchStarting', () => {
+    // reset dello stato "visivo" residuo di un'eventuale partita precedente,
+    // altrimenti il primo frame della nuova partita potrebbe mostrare per
+    // un istante posizioni/countdown vecchi
+    lastRoleMessage = null;
+    lastCountdownValue = null;
+    walkState.clear();
+    showScreen('game');
+  });
 
-  let msg;
-  if (matchOver) {
-    msg = scoreText
-      ? `🏆 ${matchWinnerName} vince la partita! (${scoreText})`
-      : `🏆 ${matchWinnerName} vince la partita!`;
-  } else {
-    const setMsg = winner === 'hunter'
-      ? 'Il cacciatore ha preso l\'avversario! 🎯'
-      : 'È scappato/a per tutto il round! 🏃';
-    msg = scoreText ? `${setMsg} (${scoreText})` : setMsg;
-  }
-  flashBanner(msg, matchOver ? 5500 : 4000);
+  socket.on('matchEnded', async () => {
+    await refreshMe();
+    showLobbyIdle();
+    showScreen('lobby');
+  });
+  socket.on('opponentLeft', async ({ name }) => {
+    await refreshMe();
+    showLobbyIdle();
+    showScreen('lobby');
+    setMessage(lobbyMessage, `${name} ha lasciato la partita.`, true);
+  });
 
-  // il suono è personale: lo sentono solo i due giocatori della partita, e
-  // ognuno sente la propria vittoria/sconfitta, non lo stesso audio per tutti
-  const amInMatch = !!(score && score.some((s) => s.id === myId));
-  if (amInMatch) {
-    if (matchOver) {
-      if (matchWinnerId === myId) playMatchWinTune();
-      else playSadTune();
-    } else if (winnerId === myId) {
-      playHappyTune();
-    } else {
-      playSadTune();
+  socket.on('state', (state) => {
+    latestState = state;
+    updateHud(state);
+  });
+
+  socket.on('playerCaught', ({ name }) => {
+    flashBanner(`${name} è stato preso!`, 1200);
+  });
+
+  socket.on('fruitEaten', ({ id }) => {
+    if (id === myId) {
+      flashBanner('🍎 +20% velocità per 5s!', 1400);
+      playPickupTune();
     }
-  }
-});
+  });
 
-// Il messaggio di ruolo/fase ("Si parte tra poco…", "Sei stato preso",
-// ecc.) non è più una scritta fissa nell'HUD: come chiesto, ora "lampeggia"
-// (compare e si dissolve) come il banner di fine round, invece di restare
-// sempre visibile. Per farlo lampeggiare solo QUANDO cambia (e non a ogni
-// singolo "tick" dello stato, che arriva ~20 volte al secondo) teniamo
-// traccia dell'ultimo messaggio mostrato.
+  socket.on('roundResult', ({ winner, winnerId, score, matchOver, matchWinnerId, matchWinnerName }) => {
+    const scoreText = score && score.length === 2
+      ? `${score[0].name} ${score[0].sets}–${score[1].sets} ${score[1].name}`
+      : null;
+
+    let msg;
+    if (matchOver) {
+      msg = scoreText ? `🏆 ${matchWinnerName} vince la partita! (${scoreText})` : `🏆 ${matchWinnerName} vince la partita!`;
+    } else {
+      const setMsg = winner === 'hunter'
+        ? 'Il cacciatore ha preso l\'avversario! 🎯'
+        : 'È scappato/a per tutto il round! 🏃';
+      msg = scoreText ? `${setMsg} (${scoreText})` : setMsg;
+    }
+    flashBanner(msg, matchOver ? 5500 : 4000);
+
+    const amInMatch = !!(score && score.some((s) => s.id === myId));
+    if (amInMatch) {
+      if (matchOver) {
+        if (matchWinnerId === myId) playMatchWinTune();
+        else playSadTune();
+      } else if (winnerId === myId) {
+        playHappyTune();
+      } else {
+        playSadTune();
+      }
+    }
+  });
+}
+
+// Il messaggio di ruolo ("Sei il cacciatore!", "Scappa!", ecc.) "lampeggia"
+// (compare e si dissolve) invece di restare fisso — per farlo lampeggiare
+// solo QUANDO cambia (e non a ogni singolo "tick" dello stato, ~20 volte al
+// secondo) teniamo traccia dell'ultimo messaggio mostrato.
 let lastRoleMessage = null;
 
 function updateHud(state) {
-  playersLabel.textContent = `${state.players.length} giocatori`;
-
-  // Punteggio della partita 1v1 in corso (al meglio di 5: chi arriva a 3
-  // set vinti vince) — vuoto quando non c'è una partita attiva, es. si è
-  // ancora in attesa di un secondo giocatore.
   if (state.match) {
     const [a, b] = state.match.players;
     matchScoreLabel.textContent = `${a.name} ${a.sets}–${b.sets} ${b.name}`;
@@ -112,18 +362,13 @@ function updateHud(state) {
   }
 
   const me = state.players.find((p) => p.id === myId);
-  const amInMatch = !!(state.match && state.match.players.some((p) => p.id === myId));
   let msg = null;
-  if (state.phase === 'waiting') {
-    msg = 'In attesa di un avversario…';
-  } else if (state.phase === 'countdown') {
+  if (state.phase === 'countdown') {
     msg = 'Si parte tra poco…';
   } else if (me) {
     if (me.role === 'hunter') msg = '🎯 Sei il cacciatore! Prendilo.';
-    else if (me.role === 'runner' && me.alive) msg = '🏃 Scappa!';
-    else if (me.role === 'runner' && !me.alive) msg = 'Sei stato preso — guarda il resto del set.';
-    else if (amInMatch) msg = 'In attesa del prossimo set…';
-    else msg = 'Sei spettatore, in attesa che si liberi un posto nella partita 1v1.';
+    else if (me.alive) msg = '🏃 Scappa!';
+    else msg = 'Sei stato preso — guarda il resto del set.';
   }
   if (msg && msg !== lastRoleMessage) {
     lastRoleMessage = msg;
@@ -172,13 +417,13 @@ function flashBanner(text, ms) {
   bannerTimeout = setTimeout(() => { banner.classList.remove('show'); }, ms);
 }
 
-// ---- Musichette di fine round ---------------------------------------------
+// ---- Musichette di fine round/partita --------------------------------------
 // Niente file audio da caricare: generiamo le note al volo con il Web
 // Audio API, che ogni browser sa già fare da solo. I browser bloccano
 // l'audio finché non c'è stata almeno un'interazione vera dell'utente —
-// per questo "sblocchiamo" l'audio proprio nel click di "Entra in
-// partita" (initAudio, chiamato più sotto), lo stesso identico gesto che
-// usiamo già per lo schermo sempre acceso.
+// per questo "sblocchiamo" l'audio al primo gesto utile (login, trova
+// avversario, invita, accetta invito: initAudio/tryKeepScreenAwake si
+// guardano da sole dal fare doppio lavoro se richiamate più volte).
 let audioCtx = null;
 function initAudio() {
   if (audioCtx) return;
@@ -198,8 +443,6 @@ function playNote(freq, startDelay, duration, volume = 0.15) {
   osc.type = 'sine';
   osc.frequency.value = freq;
   const startTime = audioCtx.currentTime + startDelay;
-  // una piccola "busta" di volume che sale e scende dolcemente: senza,
-  // si sente un click secco all'inizio e alla fine di ogni nota
   gain.gain.setValueAtTime(0, startTime);
   gain.gain.linearRampToValueAtTime(volume, startTime + 0.02);
   gain.gain.linearRampToValueAtTime(0, startTime + duration);
@@ -210,42 +453,26 @@ function playNote(freq, startDelay, duration, volume = 0.15) {
 }
 
 function playSadTune() {
-  // 4 note discendenti in tonalità minore: la classica "musichina della
-  // sconfitta" (Sol-Fa-Mib-Do)
   const notes = [392.0, 349.23, 311.13, 261.63];
   notes.forEach((freq, i) => playNote(freq, i * 0.22, 0.35));
 }
 
 function playHappyTune() {
-  // piccolo arpeggio ascendente in maggiore: una mini-fanfara di vittoria
   const notes = [523.25, 659.25, 783.99, 1046.5];
   notes.forEach((freq, i) => playNote(freq, i * 0.12, 0.25));
 }
 
 function playMatchWinTune() {
-  // fanfara più lunga e "piena" del semplice arpeggio di fine set: questa
-  // suona solo a chi ha appena vinto l'intera partita (3 set), non un set
-  // qualsiasi, quindi merita di sentirsi più importante
   const notes = [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5, 1318.51];
   notes.forEach((freq, i) => playNote(freq, i * 0.11, 0.3, 0.16));
 }
 
 function playPickupTune() {
-  // due note brevi e acute: il classico "blip" di raccolta oggetto
   playNote(880, 0, 0.08, 0.12);
   playNote(1174.66, 0.06, 0.12, 0.12);
 }
 
 // ---- Schermo sempre acceso (mobile) ---------------------------------------
-// Non proviamo più a forzare l'orientamento orizzontale via JS (fullscreen +
-// screen.orientation.lock): su alcuni telefoni/browser mandava in confusione
-// il ridimensionamento della pagina. Restiamo con la soluzione più semplice
-// e affidabile ovunque: il CSS adatta l'arena allo schermo disponibile, e se
-// il telefono è in verticale mostriamo l'avviso di ruotarlo a mano.
-
-// Il telefono spegnerebbe lo schermo per inattività, ma durante la partita
-// non stai "toccando" lo schermo in continuazione (tieni il dito fermo sul
-// joystick) — il Wake Lock dice al sistema operativo di non spegnerlo.
 let wakeLock = null;
 async function tryKeepScreenAwake() {
   try {
@@ -257,8 +484,11 @@ async function tryKeepScreenAwake() {
   }
 }
 
-// Il Wake Lock si rilascia da solo quando cambi scheda/app; se torni sul
-// gioco proviamo a richiederlo di nuovo.
+function unlockMediaOnce() {
+  initAudio();
+  tryKeepScreenAwake();
+}
+
 document.addEventListener('visibilitychange', async () => {
   if (wakeLock !== null && document.visibilityState === 'visible' && !gameScreen.hidden) {
     try {
@@ -270,11 +500,6 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 // ---- Input da tastiera ----------------------------------------------------
-// vx/vy sono usati solo dal joystick touch (direzione analogica a 360°);
-// tastiera e TrackPoint restano a interruttori (up/down/left/right) come
-// sempre e si assicurano di azzerare vx/vy ogni volta, così se cambi
-// metodo di controllo a metà partita non resta "incastrato" un vecchio
-// valore del joystick.
 const input = { up: false, down: false, left: false, right: false, vx: 0, vy: 0 };
 const KEY_MAP = {
   ArrowUp: 'up', w: 'up', W: 'up',
@@ -285,7 +510,7 @@ const KEY_MAP = {
 
 function setKey(e, value) {
   const dir = KEY_MAP[e.key];
-  if (!dir) return;
+  if (!dir || !socket) return;
   if (input[dir] !== value) {
     input[dir] = value;
     input.vx = 0;
@@ -297,40 +522,27 @@ window.addEventListener('keydown', (e) => setKey(e, true));
 window.addEventListener('keyup', (e) => setKey(e, false));
 
 // ---- Controllo con il TrackPoint (il tappo rosso dei portatili Lenovo) ---
-// Il TrackPoint si comporta come un mouse: quando lo spingi, il browser
-// riceve eventi "mousemove" con lo spostamento relativo da un istante
-// all'altro (event.movementX / movementY). A differenza dei tasti non
-// esiste un evento "l'ho rilasciato" — quindi consideriamo il movimento
-// "fermo" se non arriva nessun nuovo evento per un breve istante.
-const TRACKPOINT_THRESHOLD = 2;   // sensibilità minima per contare come "spinto"
-const TRACKPOINT_RELEASE_MS = 120; // se non arrivano eventi per questo tempo, fermati
+const TRACKPOINT_THRESHOLD = 2;
+const TRACKPOINT_RELEASE_MS = 120;
 let trackpointTimeout = null;
 
-// Proviamo ad "agganciare" il cursore (Pointer Lock): così il movimento
-// resta relativo e infinito, senza fermarsi quando il cursore tocca il
-// bordo dello schermo. Se il browser lo rifiuta (es. per il vincolo di
-// contesto sicuro su indirizzi non-HTTPS) non succede nulla di grave: il
-// movimento via mousemove qui sotto continua a funzionare come prima,
-// solo con il limite del bordo schermo.
 canvas.addEventListener('click', () => {
   if (canvas.requestPointerLock) {
-    canvas.requestPointerLock().catch(() => {
-      // niente da fare: restiamo nella modalità "cursore libero"
-    });
+    canvas.requestPointerLock().catch(() => {});
   }
 });
 
 document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement !== canvas) {
-    // l'aggancio è stato rilasciato (es. hai premuto Esc): fermiamo il movimento
     input.up = input.down = input.left = input.right = false;
     input.vx = 0;
     input.vy = 0;
-    socket.emit('input', input);
+    if (socket) socket.emit('input', input);
   }
 });
 
 canvas.addEventListener('mousemove', (e) => {
+  if (!socket) return;
   const dx = e.movementX || 0;
   const dy = e.movementY || 0;
   if (dx === 0 && dy === 0) return;
@@ -356,17 +568,15 @@ canvas.addEventListener('mousemove', (e) => {
     input.up = input.down = input.left = input.right = false;
     input.vx = 0;
     input.vy = 0;
-    socket.emit('input', input);
+    if (socket) socket.emit('input', input);
   }, TRACKPOINT_RELEASE_MS);
 });
 
 // ---- Joystick touch (telefono/tablet) -------------------------------------
-// A differenza del TrackPoint, il touch ha un evento "l'ho rilasciato" vero
-// (touchend), quindi qui non serve nessun timeout per simulare il rilascio.
 const joystick = document.getElementById('joystick');
 const joystickKnob = document.getElementById('joystick-knob');
-const JOYSTICK_MAX_RADIUS = 40; // quanto può spostarsi visivamente la manopola
-const JOYSTICK_DEADZONE = 12;   // spostamento minimo prima di contare come "spinto"
+const JOYSTICK_MAX_RADIUS = 40;
+const JOYSTICK_DEADZONE = 12;
 
 let joystickTouchId = null;
 let joystickCenter = { x: 0, y: 0 };
@@ -376,26 +586,21 @@ function joystickReset() {
   input.up = input.down = input.left = input.right = false;
   input.vx = 0;
   input.vy = 0;
-  socket.emit('input', input);
+  if (socket) socket.emit('input', input);
 }
 
 function joystickHandleMove(touch) {
+  if (!socket) return;
   const dx = touch.clientX - joystickCenter.x;
   const dy = touch.clientY - joystickCenter.y;
   const dist = Math.hypot(dx, dy);
   const angle = Math.atan2(dy, dx);
 
-  // muovi la manopola visivamente, senza uscire dal cerchio
   const clampedDist = Math.min(dist, JOYSTICK_MAX_RADIUS);
   const knobX = Math.cos(angle) * clampedDist;
   const knobY = Math.sin(angle) * clampedDist;
   joystickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
 
-  // Direzione a 360°, non più arrotondata alle 8 direzioni di
-  // tastiera/TrackPoint: quanto sei fuori dalla zona morta diventa
-  // un'intensità graduale da 0 a 1 (spingi appena = cammini piano, spingi
-  // fino al bordo = velocità massima), nell'identico angolo verso cui hai
-  // spinto il dito.
   let vx = 0;
   let vy = 0;
   if (dist > JOYSTICK_DEADZONE) {
@@ -447,18 +652,11 @@ const COLORS = {
   hunter: '#f6564c',
   runner: '#4f9dfd',
   eliminated: '#5a5f6c',
-  spectator: '#5a5f6c',
 };
 const PLAYER_RADIUS = 14; // deve restare uguale a quello vero nel server, solo per il disegno
 
-// Per far "camminare" i piedini (si muovono avanti/indietro solo mentre ti
-// sposti davvero) teniamo per ogni giocatore l'ultima posizione vista e una
-// fase di animazione che avanza in base a quanta strada ha fatto.
 const walkState = new Map();
 
-// Scurisce un colore esadecimale (#rrggbb) di una quantità 0-1, per i
-// piedini/ombre — evita di dover scrivere a mano una tinta scura per ogni
-// colore del gioco.
 function darken(hex, amount) {
   const num = parseInt(hex.slice(1), 16);
   const r = Math.max(0, ((num >> 16) & 255) * (1 - amount));
@@ -467,12 +665,9 @@ function darken(hex, amount) {
   return `rgb(${r | 0}, ${g | 0}, ${b | 0})`;
 }
 
-// Un "omino" visto dall'alto, in stile chibi/giochino: corpo rotondo,
-// piedini che spuntano da sotto e si muovono camminando, un riflesso
-// lucido e due occhietti — non più un semplice pallino piatto.
 function drawOmino(p) {
   const color = !p.alive ? COLORS.eliminated : COLORS[p.role] || '#888';
-  const alpha = p.role === 'spectator' || !p.alive ? 0.35 : 1;
+  const alpha = !p.alive ? 0.35 : 1;
   const R = PLAYER_RADIUS;
 
   let ws = walkState.get(p.id);
@@ -490,16 +685,11 @@ function drawOmino(p) {
   ctx.globalAlpha = alpha;
   ctx.translate(p.x, p.y);
 
-  // ombra sotto, per dare un po' di "spessore" visto dall'alto
   ctx.beginPath();
   ctx.ellipse(0, R * 0.75, R * 0.8, R * 0.35, 0, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
   ctx.fill();
 
-  // piedini: due ovali scuri che spuntano da sotto al corpo e si alternano
-  // leggermente mentre cammina (li teniamo vicino al bordo esatto del
-  // corpo, altrimenti il cerchio disegnato sopra li coprirebbe quasi del
-  // tutto)
   ctx.fillStyle = darken(color, 0.45);
   ctx.beginPath();
   ctx.ellipse(-R * 0.4, R * 0.85 + bob, R * 0.3, R * 0.38, 0, 0, Math.PI * 2);
@@ -508,26 +698,22 @@ function drawOmino(p) {
   ctx.ellipse(R * 0.4, R * 0.85 - bob, R * 0.3, R * 0.38, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // corpo/testa: un unico cerchio morbido stile chibi
   ctx.beginPath();
   ctx.arc(0, 0, R, 0, Math.PI * 2);
   ctx.fillStyle = color;
   ctx.fill();
 
-  // riflesso lucido in alto a sinistra, per un effetto "plastica da giochino"
   ctx.beginPath();
   ctx.ellipse(-R * 0.35, -R * 0.4, R * 0.35, R * 0.22, -0.6, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
   ctx.fill();
 
-  // occhietti
   ctx.fillStyle = '#0b0c10';
   ctx.beginPath();
   ctx.arc(-R * 0.32, -R * 0.05, R * 0.13, 0, Math.PI * 2);
   ctx.arc(R * 0.32, -R * 0.05, R * 0.13, 0, Math.PI * 2);
   ctx.fill();
 
-  // contorno bianco: "questo sei tu"
   if (p.id === myId) {
     ctx.lineWidth = 2.5;
     ctx.strokeStyle = '#ffffff';
@@ -536,9 +722,6 @@ function drawOmino(p) {
     ctx.stroke();
   }
 
-  // anello dorato pulsante: "ho mangiato un frutto, sono più veloce" — si
-  // vede anche sugli altri giocatori, non solo su di te, così tutti
-  // capiscono al volo chi ha il boost attivo in questo momento
   if (p.boosted) {
     const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 100);
     ctx.lineWidth = 2.5;
@@ -550,7 +733,6 @@ function drawOmino(p) {
 
   ctx.restore();
 
-  // nome sopra la testa
   ctx.globalAlpha = 1;
   ctx.fillStyle = '#e8eaf0';
   ctx.font = '10px "Press Start 2P", system-ui';
@@ -558,10 +740,6 @@ function drawOmino(p) {
   ctx.fillText(p.name, p.x, p.y - R - 10);
 }
 
-// Frutto col boost: corpo arancio/dorato (colore diverso apposta dal rosso
-// del cacciatore, per non confonderli a colpo d'occhio), con un piccolo
-// "respiro" (si ingrandisce e rimpicciolisce leggermente) che lo fa notare
-// come oggetto raccoglibile invece che un elemento fisso della mappa.
 function drawFruit(f) {
   const pulse = 1 + 0.08 * Math.sin(Date.now() / 250 + f.id);
   const r = 9 * pulse;
@@ -569,19 +747,16 @@ function drawFruit(f) {
   ctx.save();
   ctx.translate(f.x, f.y);
 
-  // fogliolina
   ctx.fillStyle = '#4caf50';
   ctx.beginPath();
   ctx.ellipse(3, -r * 1.1, 4, 2.2, -0.5, 0, Math.PI * 2);
   ctx.fill();
 
-  // corpo del frutto
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.fillStyle = '#ffb648';
   ctx.fill();
 
-  // riflesso
   ctx.beginPath();
   ctx.ellipse(-r * 0.3, -r * 0.3, r * 0.3, r * 0.18, -0.6, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
@@ -592,30 +767,24 @@ function drawFruit(f) {
 
 function draw() {
   requestAnimationFrame(draw);
-  if (!latestState) return;
+  if (gameScreen.hidden || !latestState) return;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // ostacoli
   ctx.fillStyle = '#33384a';
   for (const o of latestState.arena.obstacles) {
     ctx.fillRect(o.x, o.y, o.w, o.h);
   }
 
-  // frutti: disegnati PRIMA dei giocatori, così chi ci cammina sopra
-  // sembra passarci davanti invece che sopra
   for (const f of latestState.fruits || []) {
     drawFruit(f);
   }
 
-  // dimentica gli omini di chi si è disconnesso, altrimenti la mappa
-  // walkState crescerebbe all'infinito partita dopo partita
   const currentIds = new Set(latestState.players.map((p) => p.id));
   for (const id of walkState.keys()) {
     if (!currentIds.has(id)) walkState.delete(id);
   }
 
-  // giocatori
   for (const p of latestState.players) {
     drawOmino(p);
   }
