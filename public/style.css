@@ -151,6 +151,35 @@ canvas {
   }
 }
 
+/* ---- Layout in orizzontale su telefono: l'arena non deve sparire sotto
+   il joystick ------------------------------------------------------------ */
+/* L'arena è 800x600 (rapporto 4:3) — su un telefono in orizzontale, molto
+   più largo che alto, se il canvas si adattasse alla LARGHEZZA dello
+   schermo diventerebbe enorme e finirebbe proprio sotto al joystick.
+   Facendolo adattare invece all'ALTEZZA disponibile, resta "quadratino" e
+   centrato, lasciando libere le due fasce ai lati — lì dove sta il
+   joystick, senza sovrapporsi mai all'area di gioco vera. */
+@media (hover: none) and (pointer: coarse) and (orientation: landscape) {
+  #game-screen {
+    height: 100vh;
+    justify-content: center;
+    padding: 4px;
+    gap: 4px;
+  }
+
+  #hud {
+    min-height: 18px;
+    font-size: 13px;
+  }
+
+  canvas {
+    height: calc(100vh - 30px);
+    max-height: calc(100vh - 30px);
+    width: auto;
+    max-width: 100%;
+  }
+}
+
 /* ---- Suggerimento di ruotare il telefono -------------------------------- */
 #rotate-hint {
   display: none;
