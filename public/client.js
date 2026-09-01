@@ -112,7 +112,12 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 // ---- Input da tastiera ----------------------------------------------------
-const input = { up: false, down: false, left: false, right: false };
+// vx/vy sono usati solo dal joystick touch (direzione analogica a 360°);
+// tastiera e TrackPoint restano a interruttori (up/down/left/right) come
+// sempre e si assicurano di azzerare vx/vy ogni volta, così se cambi
+// metodo di controllo a metà partita non resta "incastrato" un vecchio
+// valore del joystick.
+const input = { up: false, down: false, left: false, right: false, vx: 0, vy: 0 };
 const KEY_MAP = {
   ArrowUp: 'up', w: 'up', W: 'up',
   ArrowDown: 'down', s: 'down', S: 'down',
@@ -125,6 +130,8 @@ function setKey(e, value) {
   if (!dir) return;
   if (input[dir] !== value) {
     input[dir] = value;
+    input.vx = 0;
+    input.vy = 0;
     socket.emit('input', input);
   }
 }
@@ -159,6 +166,8 @@ document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement !== canvas) {
     // l'aggancio è stato rilasciato (es. hai premuto Esc): fermiamo il movimento
     input.up = input.down = input.left = input.right = false;
+    input.vx = 0;
+    input.vy = 0;
     socket.emit('input', input);
   }
 });
@@ -178,11 +187,17 @@ canvas.addEventListener('mousemove', (e) => {
   for (const d of ['up', 'down', 'left', 'right']) {
     if (input[d] !== dir[d]) { input[d] = dir[d]; changed = true; }
   }
-  if (changed) socket.emit('input', input);
+  if (changed) {
+    input.vx = 0;
+    input.vy = 0;
+    socket.emit('input', input);
+  }
 
   clearTimeout(trackpointTimeout);
   trackpointTimeout = setTimeout(() => {
     input.up = input.down = input.left = input.right = false;
+    input.vx = 0;
+    input.vy = 0;
     socket.emit('input', input);
   }, TRACKPOINT_RELEASE_MS);
 });
@@ -201,6 +216,8 @@ let joystickCenter = { x: 0, y: 0 };
 function joystickReset() {
   joystickKnob.style.transform = 'translate(-50%, -50%)';
   input.up = input.down = input.left = input.right = false;
+  input.vx = 0;
+  input.vy = 0;
   socket.emit('input', input);
 }
 
@@ -208,28 +225,36 @@ function joystickHandleMove(touch) {
   const dx = touch.clientX - joystickCenter.x;
   const dy = touch.clientY - joystickCenter.y;
   const dist = Math.hypot(dx, dy);
+  const angle = Math.atan2(dy, dx);
 
   // muovi la manopola visivamente, senza uscire dal cerchio
   const clampedDist = Math.min(dist, JOYSTICK_MAX_RADIUS);
-  const angle = Math.atan2(dy, dx);
   const knobX = Math.cos(angle) * clampedDist;
   const knobY = Math.sin(angle) * clampedDist;
   joystickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
 
-  const dir = dist < JOYSTICK_DEADZONE
-    ? { up: false, down: false, left: false, right: false }
-    : {
-        up: dy < -JOYSTICK_DEADZONE,
-        down: dy > JOYSTICK_DEADZONE,
-        left: dx < -JOYSTICK_DEADZONE,
-        right: dx > JOYSTICK_DEADZONE,
-      };
-
-  let changed = false;
-  for (const d of ['up', 'down', 'left', 'right']) {
-    if (input[d] !== dir[d]) { input[d] = dir[d]; changed = true; }
+  // Direzione a 360°, non più arrotondata alle 8 direzioni di
+  // tastiera/TrackPoint: quanto sei fuori dalla zona morta diventa
+  // un'intensità graduale da 0 a 1 (spingi appena = cammini piano, spingi
+  // fino al bordo = velocità massima), nell'identico angolo verso cui hai
+  // spinto il dito.
+  let vx = 0;
+  let vy = 0;
+  if (dist > JOYSTICK_DEADZONE) {
+    const magnitude = Math.min(
+      (dist - JOYSTICK_DEADZONE) / (JOYSTICK_MAX_RADIUS - JOYSTICK_DEADZONE),
+      1
+    );
+    vx = Math.cos(angle) * magnitude;
+    vy = Math.sin(angle) * magnitude;
   }
-  if (changed) socket.emit('input', input);
+
+  if (input.vx !== vx || input.vy !== vy) {
+    input.vx = vx;
+    input.vy = vy;
+    input.up = input.down = input.left = input.right = false;
+    socket.emit('input', input);
+  }
 }
 
 joystick.addEventListener('touchstart', (e) => {
