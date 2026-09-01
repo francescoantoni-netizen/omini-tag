@@ -29,6 +29,10 @@ const COUNTDOWN_MS = 3 * 1000;
 const RESULT_PAUSE_MS = 5 * 1000;
 const TICK_MS = 50; // 20 aggiornamenti al secondo
 
+// ---- Partita 1 contro 1, al meglio di 5 set ------------------------------
+const SETS_TO_WIN = 3;              // chi arriva a 3 set vinti si aggiudica la partita
+const MATCH_RESULT_PAUSE_MS = 7 * 1000; // pausa più lunga a fine PARTITA (non solo set), per far leggere bene il punteggio finale
+
 // ---- Frutti con boost di velocità ------------------------------------
 const FRUIT_RADIUS = 10;
 const FRUIT_COUNT = 3;                // quanti frutti stanno in campo insieme
@@ -46,11 +50,19 @@ const OBSTACLES = [
 // players: Map<socketId, { id, name, x, y, input, role, alive, order }>
 const players = new Map();
 let joinCounter = 0;
-let lastHunterOrder = -1; // per ruotare il cacciatore in modo equo tra i round
 
 let phase = 'waiting'; // waiting | countdown | playing | ended
 let phaseEndsAt = 0;
 let roundEndsAt = 0;
+
+// matchPlayerIds: i due id dei giocatori della partita 1v1 in corso (gli
+// altri connessi restano spettatori). setScore: quanti set ha vinto
+// ciascuno dei due nella partita attuale (si azzera a ogni nuova partita).
+// lastHunterId: chi ha fatto il cacciatore nel set appena finito, per
+// alternare sempre il ruolo al set successivo.
+let matchPlayerIds = [];
+let setScore = {};
+let lastHunterId = null;
 
 // fruits: [{ id, x, y }]. pendingFruitRespawns: timestamp a cui far
 // ricomparire un frutto nuovo, uno per ogni frutto mangiato in attesa.
@@ -66,14 +78,14 @@ function connectedCount() {
   return players.size;
 }
 
-function pickNextHunter() {
-  const candidates = [...players.values()].sort((a, b) => a.order - b.order);
-  if (candidates.length === 0) return null;
-  // scegli il primo giocatore connesso con "order" superiore all'ultimo cacciatore,
-  // altrimenti riparti dall'inizio della lista (rotazione circolare)
-  let next = candidates.find((p) => p.order > lastHunterOrder);
-  if (!next) next = candidates[0];
-  return next;
+function pickMatchPlayers() {
+  // i due giocatori connessi da più tempo (in ordine di ingresso) formano
+  // la partita 1v1; chiunque altro resta spettatore in attesa che uno dei
+  // due si scolleghi e liberi un posto.
+  return [...players.values()]
+    .sort((a, b) => a.order - b.order)
+    .slice(0, 2)
+    .map((p) => p.id);
 }
 
 function spawnPosition() {
@@ -138,9 +150,37 @@ function startCountdown() {
   phase = 'countdown';
   phaseEndsAt = Date.now() + COUNTDOWN_MS;
 
-  const hunter = pickNextHunter();
+  // Se non c'è già una partita in corso con entrambi i giocatori ancora
+  // connessi (partita nuova, oppure quella precedente è appena finita a
+  // 3 set), scegliamo chi gioca e ripartiamo da 0-0.
+  const stillHere = matchPlayerIds.length === 2 && matchPlayerIds.every((id) => players.has(id));
+  if (!stillHere) {
+    matchPlayerIds = pickMatchPlayers();
+    setScore = {};
+    for (const id of matchPlayerIds) setScore[id] = 0;
+    lastHunterId = null; // il primo cacciatore della partita si sceglie a caso
+  }
+
+  // Il cacciatore si alterna sempre da un set all'altro, indipendentemente
+  // da chi ha vinto — così in una partita al meglio di 5 ognuno fa il
+  // cacciatore circa la metà dei set. Al primo set della partita (nessun
+  // "ultimo cacciatore" registrato) si sceglie a caso tra i due.
+  let hunterId;
+  if (lastHunterId != null && matchPlayerIds.includes(lastHunterId)) {
+    hunterId = matchPlayerIds.find((id) => id !== lastHunterId);
+  } else {
+    hunterId = matchPlayerIds[Math.floor(Math.random() * matchPlayerIds.length)];
+  }
+  lastHunterId = hunterId;
+
   for (const p of players.values()) {
-    p.role = p.id === hunter?.id ? 'hunter' : 'runner';
+    if (!matchPlayerIds.includes(p.id)) {
+      // chiunque non sia uno dei due giocatori della partita resta
+      // spettatore, in attesa che si liberi un posto
+      p.role = 'spectator';
+      continue;
+    }
+    p.role = p.id === hunterId ? 'hunter' : 'runner';
     p.alive = true;
     const pos = spawnPosition();
     p.x = pos.x;
@@ -148,7 +188,6 @@ function startCountdown() {
     p.input = { up: false, down: false, left: false, right: false, vx: 0, vy: 0 };
     p.boostUntil = 0; // nessun boost residuo dal round precedente
   }
-  if (hunter) lastHunterOrder = hunter.order;
 
   resetFruits();
 }
@@ -160,10 +199,43 @@ function startRound() {
 
 function endRound(winner) {
   phase = 'ended';
-  phaseEndsAt = Date.now() + RESULT_PAUSE_MS;
   fruits = [];
   pendingFruitRespawns = [];
-  io.emit('roundResult', { winner });
+
+  // "winner" è 'hunter' o 'runners': lo traduciamo nell'id del giocatore
+  // vero che ha vinto QUESTO set, per aggiornare il punteggio della partita.
+  const hunterId = matchPlayerIds.find((id) => players.get(id)?.role === 'hunter');
+  const runnerId = matchPlayerIds.find((id) => id !== hunterId);
+  const setWinnerId = winner === 'hunter' ? hunterId : runnerId;
+  if (setWinnerId != null && setScore[setWinnerId] != null) {
+    setScore[setWinnerId] += 1;
+  }
+
+  const matchWinnerId = matchPlayerIds.find((id) => (setScore[id] || 0) >= SETS_TO_WIN) || null;
+  const matchOver = matchWinnerId != null;
+  phaseEndsAt = Date.now() + (matchOver ? MATCH_RESULT_PAUSE_MS : RESULT_PAUSE_MS);
+
+  io.emit('roundResult', {
+    winner,
+    winnerId: setWinnerId,
+    score: matchPlayerIds.map((id) => ({
+      id,
+      name: players.get(id)?.name || '?',
+      sets: setScore[id] || 0,
+    })),
+    matchOver,
+    matchWinnerId,
+    matchWinnerName: matchOver ? players.get(matchWinnerId)?.name || '?' : null,
+  });
+
+  if (matchOver) {
+    // si riparte da 0-0: il prossimo startCountdown() sceglierà di nuovo i
+    // due giocatori (gli stessi due se nessun altro è in attesa, altrimenti
+    // si libera un posto per chi era spettatore)
+    matchPlayerIds = [];
+    setScore = {};
+    lastHunterId = null;
+  }
 }
 
 function movePlayer(p, dt) {
@@ -267,6 +339,18 @@ setInterval(() => {
     countdownLeft: phase === 'countdown' ? Math.max(0, phaseEndsAt - now) : null,
     arena: { w: ARENA_W, h: ARENA_H, obstacles: OBSTACLES },
     fruits: fruits.map((f) => ({ id: f.id, x: f.x, y: f.y })),
+    // punteggio della partita 1v1 in corso (null se al momento non c'è una
+    // partita attiva, es. si è in attesa di un secondo giocatore)
+    match: matchPlayerIds.length === 2
+      ? {
+          setsToWin: SETS_TO_WIN,
+          players: matchPlayerIds.map((id) => ({
+            id,
+            name: players.get(id)?.name || '?',
+            sets: setScore[id] || 0,
+          })),
+        }
+      : null,
     players: [...players.values()].map((p) => ({
       id: p.id,
       name: p.name,
@@ -315,7 +399,16 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     players.delete(socket.id);
-    if (connectedCount() < 2 && phase !== 'waiting') {
+    if (matchPlayerIds.includes(socket.id)) {
+      // uno dei due giocatori della partita in corso se n'è andato: la
+      // partita si interrompe qui, niente vincitore per abbandono. Se resta
+      // qualcun altro in attesa, la prossima startCountdown() sceglie una
+      // nuova coppia da zero.
+      matchPlayerIds = [];
+      setScore = {};
+      lastHunterId = null;
+      phase = 'waiting';
+    } else if (connectedCount() < 2 && phase !== 'waiting') {
       phase = 'waiting';
     }
   });
