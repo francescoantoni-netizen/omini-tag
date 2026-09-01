@@ -1,5 +1,65 @@
 # Acchiapparella — documento di design (v1, prototipo)
 
+## Aggiornamento v2: 1 contro 1, al meglio di 5 set + frutti
+
+Rispetto al v1 descritto qui sotto (pensato per un gruppo 3-8 persone con un
+solo cacciatore e tutti gli altri fuggitivi), il gioco ora funziona a
+**partite 1 contro 1**:
+
+- Ogni **set** dura al massimo 45 secondi, con le stesse regole di cattura
+  del v1 (cacciatore tocca il fuggitivo → cacciatore vince il set; tempo
+  scaduto → vince il fuggitivo).
+- Il ruolo di cacciatore **si alterna sempre** da un set all'altro tra i due
+  giocatori, indipendentemente da chi ha vinto — equità garantita invece
+  che affidata alla rotazione su un gruppo più grande.
+- Vince la **partita** chi arriva per primo a **3 set vinti** (al meglio di
+  5: il punteggio finale può essere 3-0, 3-1 o 3-2).
+- Sono stati aggiunti dei **frutti** raccoglibili in campo (+20% velocità
+  per 5 secondi) come primo power-up del gioco.
+- Se una terza persona si collegava mentre due stavano già giocando,
+  restava spettatrice finché non si liberava un posto — non c'era ancora un
+  vero sistema di coda/matchmaking. **Superato dal v3 qui sotto**, che
+  aggiunge login utente, coda automatica/inviti diretti e statistiche
+  persistenti.
+
+## Aggiornamento v3: account, statistiche persistenti, matchmaking
+
+Rispetto al v2 (dove chiunque si collegava finiva nella stessa arena
+condivisa), il gioco ora funziona **come un sito di scacchi**:
+
+- **Account veri**: username + email + password, con conferma email
+  obbligatoria prima di poter accedere e un flusso completo di "password
+  dimenticata". Le password non sono mai salvate in chiaro (solo il loro
+  hash bcrypt), i token di verifica/reset scadono e sono usa-e-getta.
+- **Statistiche persistenti**: partite vinte/perse e set vinti/persi
+  restano sull'account tra una sessione e l'altra, salvati in un database
+  Postgres vero (non più in memoria: sopravvivono a un riavvio/redeploy del
+  server).
+- **Matchmaking**: dalla lobby si preme "Trova avversario" per entrare in
+  una coda FIFO (il primo che aspetta è il primo ad essere accoppiato con
+  chi arriva dopo), oppure si invita un amico specifico digitando il suo
+  username — lui riceve l'invito in tempo reale e può accettare o
+  rifiutare.
+- **Partite multiple in contemporanea**: non c'è più un'unica arena
+  condivisa da tutti i connessi. Ogni coppia che sta giocando ha la propria
+  "Room" indipendente (il termine tecnico è in `game.js`), con il proprio
+  arbitro/timer — proprio come un sito di scacchi gestisce tante partite
+  insieme, non solo una alla volta. Chi è collegato ma non sta giocando (in
+  coda, o semplicemente in lobby) non fa parte di nessuna Room.
+
+### Cosa resta fuori anche da v3 (di proposito)
+
+Per tenere lo scope gestibile restano fuori: matchmaking per livello di
+bravura (un rating tipo Elo, invece della semplice coda FIFO), una
+classifica globale, la cronologia delle singole partite giocate (si vede
+solo il totale aggregato vinte/perse), il supporto a più dispositivi
+collegati con lo stesso account in contemporanea (l'ultimo collegamento
+"scollega" il precedente), e la ripresa automatica di una partita
+interrotta da una disconnessione (se un giocatore si scollega a metà
+partita, la partita finisce lì senza vincitore/punteggio registrato). Sono
+tutte estensioni naturali del sistema di account/matchmaking appena
+descritto.
+
 ## Concept
 
 Piccolo gioco multiplayer in tempo reale da giocare nel browser con gli amici, senza installazioni: si apre un link e si è subito in partita. Obiettivo del progetto: imparare le basi dello sviluppo di un gioco (loop, stato condiviso, sincronizzazione in tempo reale) partendo da qualcosa di volutamente semplice.
