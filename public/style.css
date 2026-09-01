@@ -26,7 +26,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
+  background: var(--bg) url('cover.jpg') center / cover no-repeat;
   color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
@@ -34,7 +34,14 @@ body {
 #join-screen {
   text-align: center;
   max-width: 360px;
-  padding: 24px;
+  padding: 24px 28px;
+  /* "vetro smerigliato" sopra l'immagine di sfondo, così il testo resta
+     leggibile qualunque sia il punto dell'immagine dietro */
+  background: rgba(20, 22, 27, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 #join-screen h1 { margin-bottom: 4px; }
@@ -71,6 +78,21 @@ button {
   align-items: center;
   gap: 10px;
   padding: 16px;
+  /* opaco: durante la partita non vogliamo l'immagine di sfondo della home
+     a distrarre dietro all'arena */
+  background: var(--bg);
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* Bug trovato: l'attributo HTML "hidden" da solo dice al browser di
+   nascondere l'elemento, ma la nostra regola qui sopra ("display: flex")
+   vince comunque sul comportamento di default del browser, quindi
+   #game-screen restava sempre visibile, sovrapposto alla home — è per
+   questo che il joystick "spuntava" già sulla schermata del nome. Questa
+   riga forza di nuovo il nascondimento quando l'attributo è presente. */
+#game-screen[hidden] {
+  display: none;
 }
 
 #hud {

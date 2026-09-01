@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Acchiapparella</title>
   <link rel="stylesheet" href="style.css" />
+
+  <!-- Questi permettono di "installare" il gioco sulla schermata Home del
+       telefono: aperto da lì (non da un link/segnalibro) il browser non
+       mostra più barra degli indirizzi né altri controlli — l'unico modo
+       vero per avere l'impressione di un'app invece che di una pagina web,
+       cosa che una pagina normale non può fare da sola per motivi di
+       sicurezza (altrimenti qualunque sito potrebbe fingersi un'altra app). -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#14161b" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Acchiapparella" />
 </head>
 <body>
   <div id="join-screen">
