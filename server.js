@@ -22,7 +22,7 @@ const ARENA_W = 800;
 const ARENA_H = 600;
 const PLAYER_RADIUS = 14;
 const RUNNER_SPEED = 200;       // px al secondo
-const HUNTER_SPEED = RUNNER_SPEED * 1.0; // +20%, altrimenti il cacciatore non prende mai nessuno
+const HUNTER_SPEED = RUNNER_SPEED * 1.0; // nessun vantaggio di velocità: il vantaggio ora è tutto nel controllo
 const CATCH_DISTANCE = PLAYER_RADIUS * 2;
 const ROUND_DURATION_MS = 45 * 1000;
 const COUNTDOWN_MS = 3 * 1000;
@@ -94,7 +94,7 @@ function startCountdown() {
     const pos = spawnPosition();
     p.x = pos.x;
     p.y = pos.y;
-    p.input = { up: false, down: false, left: false, right: false };
+    p.input = { up: false, down: false, left: false, right: false, vx: 0, vy: 0 };
   }
   if (hunter) lastHunterOrder = hunter.order;
 }
@@ -113,14 +113,27 @@ function endRound(winner) {
 function movePlayer(p, dt) {
   if (phase !== 'playing' || p.role === 'spectator' || !p.alive) return;
 
-  const { up, down, left, right } = p.input;
-  let dx = (right ? 1 : 0) - (left ? 1 : 0);
-  let dy = (down ? 1 : 0) - (up ? 1 : 0);
-  if (dx !== 0 && dy !== 0) {
-    // normalizza il movimento in diagonale, altrimenti si andrebbe più
-    // veloci in diagonale che in linea retta
-    dx *= Math.SQRT1_2;
-    dy *= Math.SQRT1_2;
+  let dx, dy;
+  if (p.input.vx !== 0 || p.input.vy !== 0) {
+    // Input "analogico" (joystick touch sul telefono): il client manda
+    // direttamente la direzione esatta verso cui hai spinto il dito,
+    // come vettore (vx, vy) invece che 4 interruttori — per questo qui
+    // il movimento può puntare in QUALSIASI angolo, non solo le 8
+    // direzioni possibili con tastiera/TrackPoint.
+    dx = p.input.vx;
+    dy = p.input.vy;
+    const mag = Math.hypot(dx, dy);
+    if (mag > 1) { dx /= mag; dy /= mag; } // non superare la velocità massima
+  } else {
+    const { up, down, left, right } = p.input;
+    dx = (right ? 1 : 0) - (left ? 1 : 0);
+    dy = (down ? 1 : 0) - (up ? 1 : 0);
+    if (dx !== 0 && dy !== 0) {
+      // normalizza il movimento in diagonale, altrimenti si andrebbe più
+      // veloci in diagonale che in linea retta
+      dx *= Math.SQRT1_2;
+      dy *= Math.SQRT1_2;
+    }
   }
 
   const speed = p.role === 'hunter' ? HUNTER_SPEED : RUNNER_SPEED;
@@ -206,7 +219,7 @@ io.on('connection', (socket) => {
       name: String(name || 'Omino').slice(0, 16),
       x: pos.x,
       y: pos.y,
-      input: { up: false, down: false, left: false, right: false },
+      input: { up: false, down: false, left: false, right: false, vx: 0, vy: 0 },
       role: 'spectator', // entra come spettatore, gioca dal round successivo
       alive: true,
       order: joinCounter++,
@@ -222,6 +235,11 @@ io.on('connection', (socket) => {
       down: !!input.down,
       left: !!input.left,
       right: !!input.right,
+      // vx/vy: direzione analogica dal joystick touch, un numero da -1 a 1
+      // per asse. Validiamo che siano numeri veri (mai fidarsi di quello
+      // che manda il client) e li teniamo dentro il range consentito.
+      vx: typeof input.vx === 'number' ? clamp(input.vx, -1, 1) : 0,
+      vy: typeof input.vy === 'number' ? clamp(input.vy, -1, 1) : 0,
     };
   });
 
