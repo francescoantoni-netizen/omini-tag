@@ -18,6 +18,18 @@
 
 * { box-sizing: border-box; }
 
+/* Bug di CSS ricorrente in questo progetto: l'attributo HTML "hidden" da
+   solo direbbe al browser di nascondere l'elemento, ma qualunque nostra
+   regola più sotto che imposta "display" sullo stesso elemento (flex,
+   block...) vince comunque sul comportamento di default del browser — per
+   questo login/registrazione/password dimenticata/reset e le schermate
+   della lobby comparivano tutte impilate insieme invece di alternarsi.
+   Questa riga, con !important, garantisce che [hidden] vinca SEMPRE,
+   qualunque display venga dichiarato altrove in questo file (anche in
+   futuro, per nuovi elementi) — niente più bisogno di ripetere il fix
+   elemento per elemento. */
+[hidden] { display: none !important; }
+
 /* Niente scroll/rimbalzo della pagina: il gioco è pensato per stare tutto
    in una schermata, quindi se il dito tocca fuori dai controlli (es. sulla
    schermata del nome) non deve muovere la pagina su e giù. */
@@ -172,16 +184,6 @@ button {
   background: var(--bg);
   min-height: 100vh;
   width: 100%;
-}
-
-/* Bug trovato: l'attributo HTML "hidden" da solo dice al browser di
-   nascondere l'elemento, ma la nostra regola qui sopra ("display: flex")
-   vince comunque sul comportamento di default del browser, quindi
-   #game-screen restava sempre visibile, sovrapposto alla home — è per
-   questo che il joystick "spuntava" già sulla schermata del nome. Questa
-   riga forza di nuovo il nascondimento quando l'attributo è presente. */
-#game-screen[hidden] {
-  display: none;
 }
 
 #hud {
